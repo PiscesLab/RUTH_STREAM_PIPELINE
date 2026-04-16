@@ -1,0 +1,17 @@
+kind: io.statefun.endpoints.v2/http
+spec:
+  functions: com.ruth/*
+  urlPathTemplate: http://host.docker.internal:8000/statefun
+---
+kind: io.statefun.kafka.v1/ingress
+spec:
+  id: com.ruth/fcd-ingress
+  address: host.docker.internal:29092
+  consumerGroupId: ruth-group
+  startupPosition:
+    type: earliest
+  topics:
+    - topic: fcd_events_keyed
+      valueType: io.statefun.types/string
+      targets:
+        - com.ruth/vehicle
