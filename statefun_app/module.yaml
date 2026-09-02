@@ -1,12 +1,12 @@
 kind: io.statefun.endpoints.v2/http
 spec:
   functions: com.ruth/*
-  urlPathTemplate: http://host.docker.internal:8000/statefun
+  urlPathTemplate: http://172.17.0.1:8000/statefun
 ---
 kind: io.statefun.kafka.v1/ingress
 spec:
   id: com.ruth/fcd-ingress
-  address: host.docker.internal:29092
+  address: 172.17.0.1:9092
   consumerGroupId: ruth-group
   startupPosition:
     type: earliest

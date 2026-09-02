@@ -1,6 +1,7 @@
 from aiohttp import web
 from statefun import *
 import json
+from ml_functions import get_ml_predictions
 
 functions = StatefulFunctions()
 
@@ -75,6 +76,19 @@ async def segment_fn(ctx: Context, message: Message):
         f"count={count} avg_speed={avg_speed:.2f} congestion={congestion}"
     )
 
+    # Get ML predictions
+    congestion_level = 0 if congestion == "HIGH" else (1 if congestion == "MEDIUM" else 2)
+    ml_preds = get_ml_predictions(
+        data['segment_id'],
+        float(ctx.storage.segment_length_m or 0.0),
+        count,
+        speed_sum,
+        vehicle_type_diversity=1,
+        current_congestion_level=congestion_level
+    )
+    if ml_preds and 'predicted_congestion' in ml_preds:
+        print(f"[CONGESTION PREDICTION] segment={data['segment_id']} predicted_congestion={ml_preds['predicted_congestion']}")
+
     travel_msg = {
         "segment_id": data["segment_id"],
         "avg_speed_mps": avg_speed,
@@ -113,6 +127,28 @@ async def travel_time_fn(ctx: Context, message: Message):
         f"avg_speed={avg_speed:.2f}m/s "
         f"time={travel_time_seconds:.2f}s"
     )
+
+    # Get ML predictions for travel time and future congestion
+    try:
+        # Estimate vehicle count from speed variance
+        vehicle_count = max(1, int(segment_length / 10))
+
+        ml_preds = get_ml_predictions(
+            data['segment_id'],
+            segment_length,
+            vehicle_count,
+            avg_speed * vehicle_count,
+            vehicle_type_diversity=1,
+            current_congestion_level=1
+        )
+
+        if ml_preds:
+            if 'predicted_travel_time' in ml_preds:
+                print(f"[TRAVEL TIME PREDICTION] segment={data['segment_id']} predicted_travel_time={ml_preds['predicted_travel_time']}s")
+            if 'predicted_next_congestion' in ml_preds:
+                print(f"[FUTURE CONGESTION PREDICTION] segment={data['segment_id']} predicted_next_congestion={ml_preds['predicted_next_congestion']}")
+    except Exception as e:
+        pass  # Silent fail if ML not available
 
 
 handler = RequestReplyHandler(functions)
