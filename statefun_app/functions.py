@@ -46,6 +46,9 @@ async def vehicle_fn(ctx: Context, message: Message):
     specs=[
         ValueSpec(name="count", type=IntType),
         ValueSpec(name="speed_sum", type=DoubleType),
+        ValueSpec(name="speed_sum_sq", type=DoubleType),
+        ValueSpec(name="max_speed", type=DoubleType),
+        ValueSpec(name="min_speed", type=DoubleType),
         ValueSpec(name="segment_length_m", type=DoubleType),
         ValueSpec(name="vehicle_types", type=StringType),
     ],
@@ -54,11 +57,19 @@ async def segment_fn(ctx: Context, message: Message):
     raw = message.as_string()
     data = json.loads(raw)
 
+    speed = float(data["speed"])
+
     count = ctx.storage.count or 0
     speed_sum = ctx.storage.speed_sum or 0.0
+    speed_sum_sq = ctx.storage.speed_sum_sq or 0.0
+    prev_max = ctx.storage.max_speed
+    prev_min = ctx.storage.min_speed
 
     count += 1
-    speed_sum += float(data["speed"])
+    speed_sum += speed
+    speed_sum_sq += speed * speed
+    max_speed = speed if prev_max is None else max(prev_max, speed)
+    min_speed = speed if prev_min is None else min(prev_min, speed)
 
     # track the distinct vehicle types observed on this segment so far
     seen_types = set(filter(None, (ctx.storage.vehicle_types or "").split(",")))
@@ -69,9 +80,15 @@ async def segment_fn(ctx: Context, message: Message):
     ctx.storage.segment_length_m = float(data["segment_length_m"])
     ctx.storage.count = count
     ctx.storage.speed_sum = speed_sum
+    ctx.storage.speed_sum_sq = speed_sum_sq
+    ctx.storage.max_speed = max_speed
+    ctx.storage.min_speed = min_speed
     ctx.storage.vehicle_types = ",".join(sorted(seen_types))
 
     avg_speed = speed_sum / count if count else 0.0
+    # population variance from the running sums; clamp for float rounding
+    variance = max(0.0, (speed_sum_sq / count) - (avg_speed ** 2)) if count else 0.0
+    std_speed = variance ** 0.5
 
     if avg_speed < 5:
         congestion = "HIGH"
@@ -86,13 +103,17 @@ async def segment_fn(ctx: Context, message: Message):
         f"vehicle_types={ctx.storage.vehicle_types}"
     )
 
-    # Get ML predictions
+    # Get ML predictions, using real observed speed statistics rather than
+    # ratios guessed from avg_speed
     congestion_level = 0 if congestion == "HIGH" else (1 if congestion == "MEDIUM" else 2)
     ml_preds = get_ml_predictions(
         data['segment_id'],
         float(ctx.storage.segment_length_m or 0.0),
         count,
-        speed_sum,
+        avg_speed,
+        max_speed,
+        min_speed,
+        std_speed,
         vehicle_type_diversity=vehicle_type_diversity,
         current_congestion_level=congestion_level
     )
@@ -102,6 +123,9 @@ async def segment_fn(ctx: Context, message: Message):
     travel_msg = {
         "segment_id": data["segment_id"],
         "avg_speed_mps": avg_speed,
+        "max_speed_mps": max_speed,
+        "min_speed_mps": min_speed,
+        "std_speed_mps": std_speed,
         "segment_length_m": float(ctx.storage.segment_length_m or 0.0),
         "timestamp": data["timestamp"],
         "vehicle_count": count,
@@ -147,12 +171,18 @@ async def travel_time_fn(ctx: Context, message: Message):
         vehicle_count = int(data.get("vehicle_count", 1)) or 1
         vehicle_type_diversity = int(data.get("vehicle_type_diversity", 1))
         current_congestion_level = int(data.get("current_congestion_level", 1))
+        max_speed = float(data.get("max_speed_mps", avg_speed))
+        min_speed = float(data.get("min_speed_mps", avg_speed))
+        std_speed = float(data.get("std_speed_mps", 0.0))
 
         ml_preds = get_ml_predictions(
             data['segment_id'],
             segment_length,
             vehicle_count,
-            avg_speed * vehicle_count,
+            avg_speed,
+            max_speed,
+            min_speed,
+            std_speed,
             vehicle_type_diversity=vehicle_type_diversity,
             current_congestion_level=current_congestion_level
         )

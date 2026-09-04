@@ -1,15 +1,9 @@
 import pickle
 import os
 import numpy as np
-from collections import defaultdict
 
 # Global model cache
 _models = None
-_segment_history = defaultdict(lambda: {
-    'speeds': [],
-    'vehicle_counts': [],
-    'max_speeds': []
-})
 
 def load_models():
     """Load trained ML models from pickle files"""
@@ -105,29 +99,30 @@ def predict_future_congestion(avg_speed, max_speed, min_speed, std_speed,
     except Exception as e:
         return None
 
-def get_ml_predictions(segment_id, segment_length, count, speed_sum,
+def get_ml_predictions(segment_id, segment_length, count, avg_speed,
+                       max_speed, min_speed, std_speed,
                        vehicle_type_diversity=1, current_congestion_level=1):
     """
-    Get all ML predictions for a segment
+    Get all ML predictions for a segment, using speed statistics actually
+    observed on the segment (tracked as running state in segment_fn) rather
+    than values estimated from the average.
 
     Args:
         segment_id: Unique segment identifier
         segment_length: Length of road segment in meters
         count: Number of vehicles observed
-        speed_sum: Sum of all vehicle speeds
+        avg_speed: Mean of observed speeds (m/s)
+        max_speed: Max of observed speeds (m/s)
+        min_speed: Min of observed speeds (m/s)
+        std_speed: Standard deviation of observed speeds (m/s)
         vehicle_type_diversity: Number of different vehicle types
         current_congestion_level: 0=HIGH, 1=MEDIUM, 2=LOW
 
     Returns:
         dict with predictions or None if models not available
     """
-    if count == 0 or speed_sum == 0:
+    if count == 0 or avg_speed == 0:
         return None
-
-    avg_speed = speed_sum / count
-    max_speed = avg_speed * 1.3  # Estimate max from avg
-    min_speed = avg_speed * 0.7  # Estimate min from avg
-    std_speed = avg_speed * 0.2  # Estimate std from avg
 
     try:
         congestion_pred = predict_congestion(
