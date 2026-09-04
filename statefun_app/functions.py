@@ -19,6 +19,7 @@ async def vehicle_fn(ctx: Context, message: Message):
     speed = float(event["motion"]["speed_mps"])
     segment_id = event["road"]["segment_id"]
     segment_length = float(event["road"]["segment_length_m"])
+    vehicle_type = event["vehicle"]["type"]
 
     ctx.storage.last_speed = speed
 
@@ -28,6 +29,7 @@ async def vehicle_fn(ctx: Context, message: Message):
         "timestamp": event["timestamp"],
         "vehicle_id": event["vehicle"]["id"],
         "segment_length_m": segment_length,
+        "vehicle_type": vehicle_type,
     }
 
     ctx.send(
@@ -45,6 +47,7 @@ async def vehicle_fn(ctx: Context, message: Message):
         ValueSpec(name="count", type=IntType),
         ValueSpec(name="speed_sum", type=DoubleType),
         ValueSpec(name="segment_length_m", type=DoubleType),
+        ValueSpec(name="vehicle_types", type=StringType),
     ],
 )
 async def segment_fn(ctx: Context, message: Message):
@@ -57,10 +60,16 @@ async def segment_fn(ctx: Context, message: Message):
     count += 1
     speed_sum += float(data["speed"])
 
+    # track the distinct vehicle types observed on this segment so far
+    seen_types = set(filter(None, (ctx.storage.vehicle_types or "").split(",")))
+    seen_types.add(data.get("vehicle_type", "unknown"))
+    vehicle_type_diversity = len(seen_types)
+
     # keep latest known segment length in state
     ctx.storage.segment_length_m = float(data["segment_length_m"])
     ctx.storage.count = count
     ctx.storage.speed_sum = speed_sum
+    ctx.storage.vehicle_types = ",".join(sorted(seen_types))
 
     avg_speed = speed_sum / count if count else 0.0
 
@@ -73,7 +82,8 @@ async def segment_fn(ctx: Context, message: Message):
 
     print(
         f"segment={data['segment_id']} "
-        f"count={count} avg_speed={avg_speed:.2f} congestion={congestion}"
+        f"count={count} avg_speed={avg_speed:.2f} congestion={congestion} "
+        f"vehicle_types={ctx.storage.vehicle_types}"
     )
 
     # Get ML predictions
@@ -83,7 +93,7 @@ async def segment_fn(ctx: Context, message: Message):
         float(ctx.storage.segment_length_m or 0.0),
         count,
         speed_sum,
-        vehicle_type_diversity=1,
+        vehicle_type_diversity=vehicle_type_diversity,
         current_congestion_level=congestion_level
     )
     if ml_preds and 'predicted_congestion' in ml_preds:
@@ -94,6 +104,9 @@ async def segment_fn(ctx: Context, message: Message):
         "avg_speed_mps": avg_speed,
         "segment_length_m": float(ctx.storage.segment_length_m or 0.0),
         "timestamp": data["timestamp"],
+        "vehicle_count": count,
+        "current_congestion_level": congestion_level,
+        "vehicle_type_diversity": vehicle_type_diversity,
     }
 
     ctx.send(
@@ -128,18 +141,20 @@ async def travel_time_fn(ctx: Context, message: Message):
         f"time={travel_time_seconds:.2f}s"
     )
 
-    # Get ML predictions for travel time and future congestion
+    # Get ML predictions for travel time and future congestion, using the
+    # real per-segment state computed in segment_fn (not fabricated values)
     try:
-        # Estimate vehicle count from speed variance
-        vehicle_count = max(1, int(segment_length / 10))
+        vehicle_count = int(data.get("vehicle_count", 1)) or 1
+        vehicle_type_diversity = int(data.get("vehicle_type_diversity", 1))
+        current_congestion_level = int(data.get("current_congestion_level", 1))
 
         ml_preds = get_ml_predictions(
             data['segment_id'],
             segment_length,
             vehicle_count,
             avg_speed * vehicle_count,
-            vehicle_type_diversity=1,
-            current_congestion_level=1
+            vehicle_type_diversity=vehicle_type_diversity,
+            current_congestion_level=current_congestion_level
         )
 
         if ml_preds:
