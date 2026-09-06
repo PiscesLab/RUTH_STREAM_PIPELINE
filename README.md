@@ -18,6 +18,12 @@ The pipeline processes vehicle traffic data through:
 - ML-predicted travel times
 - Future congestion predictions
 
+The pipeline runs in three selectable [processing modes](#processing-modes)
+(`stateless`, `stateful`, `predictive`) and reports its own throughput and
+latency over an HTTP endpoint, so the cost of per-segment state and of online
+ML inference can each be measured - see
+[Measuring Performance](#measuring-performance).
+
 ---
 
 ## Project Structure
@@ -174,6 +180,8 @@ Once all prerequisites are installed, follow these steps:
 2. **Start Pipeline** → Open 7 terminals and run commands below (Terminals 1-7)
 3. **Run Producer** → Send traffic data to Kafka
 4. **Monitor Output** → Watch Terminal 6 for real-time predictions
+5. **Measure Performance** → `curl localhost:8000/metrics` (see
+   [Measuring Performance](#measuring-performance))
 
 ---
 
@@ -263,11 +271,22 @@ sudo docker run -d \
 ```bash
 cd /users/Dinisha/RUTH_STREAM_PIPELINE
 source statefun-venv/bin/activate
-python3 statefun_app/functions.py
+cd statefun_app
+python3 -u functions.py
 ```
 ✅ Ready when it shows: `======== Running on http://0.0.0.0:8000 ========`
 
 **This terminal will display the output** - see it below for what to expect.
+
+The app runs in one of three **processing modes** (see
+[Processing Modes](#processing-modes) below). With no mode set it defaults to
+`predictive`, which is the full pipeline with ML enabled:
+
+```bash
+PIPELINE_MODE=stateless  python3 -u functions.py   # no state, no ML
+PIPELINE_MODE=stateful   python3 -u functions.py   # state, no ML
+PIPELINE_MODE=predictive python3 -u functions.py   # state + ML (default)
+```
 
 ---
 
@@ -339,6 +358,105 @@ segment=49147500_49377870 count=6 avg_speed=11.78 congestion=MEDIUM
 
 ---
 
+## Processing Modes
+
+The pipeline can run in three modes, selected with the `PIPELINE_MODE`
+environment variable when starting the app. They exist so the cost of each
+layer can be measured separately: routing alone, routing plus per-segment
+state, and state plus online ML inference.
+
+| Mode | Per-segment state | ML inference | What it does |
+|------|-------------------|--------------|--------------|
+| `stateless` | ✗ | ✗ | Parses and routes each event; every event judged alone, nothing remembered |
+| `stateful` | ✓ | ✗ | Tracks per-segment state and rule-based traffic stats |
+| `predictive` | ✓ | ✓ | Full pipeline: state plus all three ML models (**default**) |
+
+The visible difference between `stateless` and the other two shows up in the
+per-event log lines: in `stateless` every line reports `count=1` and a single
+`vehicle_types` entry, because nothing carries over between events. In
+`stateful`/`predictive` the count climbs and `vehicle_types` accumulates
+(e.g. `car` → `car,truck`) as a segment sees more traffic.
+
+### Console verbosity
+
+Per-event logging is **off by default** (`QUIET=1`): printing a line per event
+is slow enough to distort the throughput being measured. The app still prints a
+short heartbeat every 250 events so you can see it is alive.
+
+```bash
+QUIET=0 PIPELINE_MODE=stateful python3 -u functions.py   # full per-event logs
+```
+
+Use `QUIET=0` for demos and for checking behaviour; take **measurements** from
+`QUIET=1` runs, and keep the setting the same across modes so comparisons stay
+fair.
+
+---
+
+## Measuring Performance
+
+The app records throughput and end-to-end latency and exposes them over HTTP,
+so numbers are read on demand rather than fished out of the log stream.
+End-to-end latency uses a producer-side wall-clock timestamp (`sent_at_ms`)
+attached to every event.
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /metrics` | Current throughput and latency (avg, p50, p95, p99) |
+| `GET /metrics/reset` | Zero the counters before a measured run |
+
+### Running one measurement
+
+With the app running in the mode you want to measure:
+
+```bash
+cd /users/Dinisha/RUTH_STREAM_PIPELINE
+source statefun-venv/bin/activate
+
+curl localhost:8000/metrics/reset
+python3 producer/stream_to_kafka.py \
+  --h5 inputfiles/SanDiegoFCD100.h5 \
+  --bootstrap localhost:9092 \
+  --topic fcd_events_keyed \
+  --limit 1000
+sleep 8
+curl localhost:8000/metrics
+```
+
+Example output:
+
+```
+======================================
+ mode          : stateful
+ events        : 1000
+ elapsed       : 0.813 s
+ throughput    : 1229.3 events/s
+ latency avg   : 185.61 ms
+ latency p50   : 176.85 ms
+ latency p95   : 341.43 ms
+ latency p99   : 366.18 ms
+======================================
+```
+
+### Comparing modes
+
+Restart the app under each mode in turn and run the same measurement with the
+same `--limit`, so the modes see identical load. Notes that matter for valid
+numbers:
+
+- **Warm up `predictive` first.** The ML models load on the first event; if that
+  lands inside the measured run it inflates latency. Send ~100 events, then
+  reset and run the measured batch.
+- **Repeat each run ~3 times and take the median** - a single run is noisy.
+- **Reset between runs** (`/metrics/reset`), or counts accumulate across runs.
+- **Restarting the StateFun containers replays the whole topic** from the
+  beginning, since checkpointing is not configured. If old backlog gets mixed
+  into a run, latency readings become meaningless (stale `sent_at_ms` values).
+  For a clean slate, stop Kafka/Zookeeper, delete `/tmp/kafka-logs` and
+  `/tmp/zookeeper`, then restart them.
+
+---
+
 ## Stopping the Pipeline
 
 Stop in reverse order:
@@ -365,9 +483,22 @@ sudo docker stop statefun-master statefun-worker
 ```
 
 ### No output in Terminal 6
+- Per-event logging is off unless `QUIET=0` is set - the startup banner tells
+  you which you are in (`quiet=True` / `quiet=False`). A quiet app still prints
+  a heartbeat every 250 events.
+- Confirm events are actually being processed: `curl localhost:8000/metrics`
 - Verify all terminals 1-5 show ready status
 - Check Kafka topic exists: `./bin/kafka-topics.sh --list --bootstrap-server localhost:9092`
 - Check producer is running in Terminal 7
+
+### Producer fails with `NoBrokersAvailable`
+Kafka is not running (it can die silently). Check with
+`ss -ltn | grep 9092` and restart Terminals 1 and 2.
+
+### Latency numbers look absurd (hours, not milliseconds)
+Old backlog is being replayed with stale `sent_at_ms` timestamps. Clear it:
+stop Kafka/Zookeeper, `rm -rf /tmp/kafka-logs /tmp/zookeeper`, restart both,
+then restart the StateFun containers.
 
 ### ML model errors
 - Ensure models are trained: `ls ml/models/`
@@ -376,6 +507,10 @@ sudo docker stop statefun-master statefun-worker
 ---
 
 ## ML Models Details
+
+These run only in `predictive` mode. They are fed the speed statistics actually
+observed on each segment (running avg/max/min/std) and the real vehicle-type
+mix, tracked as StateFun state in `segment_fn`.
 
 ### Congestion Prediction Model
 - **Type**: RandomForestClassifier

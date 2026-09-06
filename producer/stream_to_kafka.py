@@ -15,6 +15,9 @@ def row_to_message(row):
         "schema_version": "ruth.fcd.v1",
         "event_type": "fcd_update",
         "timestamp": int(row["timestamp"]),
+        # wall-clock send time (ms), separate from the simulated "timestamp"
+        # above, used to measure real end-to-end processing latency
+        "sent_at_ms": int(time.time() * 1000),
         "vehicle": {
             "id": int(row["vehicle_id"]),
             "type": str(row["vehicle_type"]),
