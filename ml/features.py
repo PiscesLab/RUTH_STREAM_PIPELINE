@@ -199,6 +199,15 @@ def build_windowed_dataset(
 # crossing duration.
 SAMPLE_INTERVAL_SECONDS = 5
 
+# A gap larger than this between a vehicle's samples on one segment means it
+# left and came back, not that it lingered. Generous next to the 5s sampling
+# interval so genuinely slow crossings stay in one piece.
+REVISIT_GAP_SECONDS = 60
+
+# Floor applied to entry speed when computing the length/speed reference, so a
+# stopped vehicle does not divide by zero.
+MIN_SPEED_FOR_ESTIMATE = 0.5
+
 # Only what measurably helps. Segment context (segment_avg_speed,
 # segment_samples) is still computed and available, but an ablation showed it
 # makes predictions slightly worse (1.137s -> 1.170s MAE), so it is not fed to
@@ -231,9 +240,21 @@ def build_crossing_dataset(df, window_seconds=WINDOW_SECONDS):
         for seg, g in df.groupby("segment_id", sort=False)
     }
 
+    # A vehicle can pass the same segment more than once - a loop, a return
+    # trip. Grouping by (vehicle, segment) alone merges those into one visit
+    # spanning the gap between them, which produced "crossings" of over two
+    # hours. Split whenever consecutive samples are further apart than a
+    # vehicle sitting on the segment could explain.
+    ordered = df.sort_values(["vehicle_id", "segment_id", "timestamp"])
+    gap = ordered.groupby(["vehicle_id", "segment_id"])["timestamp"].diff()
+    new_visit = (gap.isna()) | (gap > REVISIT_GAP_SECONDS)
+    ordered = ordered.assign(visit_id=new_visit.cumsum())
+
     visits = (
-        df.groupby(["vehicle_id", "segment_id"])
+        ordered.groupby("visit_id")
         .agg(
+            vehicle_id=("vehicle_id", "first"),
+            segment_id=("segment_id", "first"),
             t_in=("timestamp", "min"),
             t_out=("timestamp", "max"),
             samples=("timestamp", "size"),
@@ -241,7 +262,7 @@ def build_crossing_dataset(df, window_seconds=WINDOW_SECONDS):
             entry_speed=("speed_mps", "first"),
             vehicle_type=("vehicle_type", "first"),
         )
-        .reset_index()
+        .reset_index(drop=True)
     )
 
     # a single sample cannot bound a duration
@@ -251,7 +272,13 @@ def build_crossing_dataset(df, window_seconds=WINDOW_SECONDS):
         visits["t_out"] - visits["t_in"] + SAMPLE_INTERVAL_SECONDS
     )
     visits["is_truck"] = (visits["vehicle_type"] == "truck").astype(int)
-    visits["naive_estimate"] = visits["segment_length"] / visits["entry_speed"]
+
+    # A stopped vehicle (speed 0) makes length/speed infinite. Floor the speed
+    # so the reference estimate stays finite; the model itself is unaffected
+    # because it takes entry_speed directly rather than the ratio.
+    visits["naive_estimate"] = visits["segment_length"] / visits["entry_speed"].clip(
+        lower=MIN_SPEED_FOR_ESTIMATE
+    )
 
     # conditions on the segment strictly before this vehicle arrived
     seg_avg, seg_n = [], []
