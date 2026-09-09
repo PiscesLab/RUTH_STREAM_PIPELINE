@@ -32,13 +32,11 @@ ML inference can each be measured - see
 RUTH_STREAM_PIPELINE/
 ├── ml/
 │   ├── models/                           # Trained ML models ( generated model pickle files)
-│   │   ├── congestion_model.pkl
 │   │   ├── travel_time_model.pkl
 │   │   └── future_congestion_model.pkl
-│   ├── features.py                      # Windowed feature definition (shared)
-│   ├── train_congestion_model.py        # Train congestion classifier
-│   ├── train_travel_time_model.py       # Train travel time regressor
-│   ├── train_future_congestion_model.py # Train future congestion classifier
+│   ├── features.py                      # Feature + target definitions (shared)
+│   ├── train_travel_time_model.py       # Train crossing-time regressor
+│   ├── train_future_congestion_model.py # Train future-traffic regressor
 │   └── train_all_models.py              # Master training script
 ├── producer/
 │   ├── stream_to_kafka.py               # Producer: sends FCD data to Kafka
@@ -199,9 +197,8 @@ python3 ml/train_all_models.py inputfiles/SanDiegoFCD100.h5
 ```
 
 **Output:**
-- `ml/models/congestion_model.pkl` - RandomForest classifier
-- `ml/models/travel_time_model.pkl` - RandomForest regressor  
-- `ml/models/future_congestion_model.pkl` - RandomForest classifier
+- `ml/models/travel_time_model.pkl` - crossing-time regressor
+- `ml/models/future_congestion_model.pkl` - future-speed regressor
 
 Models will print accuracy, F1 scores, and other metrics during training.
 
@@ -611,50 +608,73 @@ then restart the StateFun containers.
 
 ## ML Models Details
 
-These run only in `predictive` mode, on the 60-second window features
-described above. `ml/features.py` is the single definition of those features
-and is used by all three training scripts; `segment_fn` computes the same
-values at serving time, so a model is served inputs shaped exactly like its
-training data.
+Two models run in `predictive` mode. Both predict something that cannot be
+computed from their own inputs - the previous set could not, which is why they
+were replaced.
 
-Trained on `SanDiegoFCD100.h5`: 35,218 windowed samples across 2,639 segments.
+`ml/features.py` defines the features; `segment_fn` computes the same values at
+serving time. Trained on `SanDiegoFCD100.h5`.
 
-### Congestion Prediction Model
-- **Type**: RandomForestClassifier
-- **Input**: avg_speed, max_speed, min_speed, std_speed, vehicle_count, observation_count
-- **Output**: HIGH/MEDIUM/LOW
-- **Test accuracy**: 100%
+### Why these predictions exist
 
-### Travel Time Prediction Model
+A twin that only reports current conditions is a dashboard. These two answer
+questions you cannot answer by looking at the present state:
+
+- **How long will crossing this segment actually take me?** Not
+  `length / current speed` - vehicles slow at intersections and for traffic
+  ahead, so that formula is wrong by ~10% of the trip.
+- **What will this road be like in 5 minutes?** Needed to route around
+  congestion that is building, rather than reacting after it has formed.
+
+### Travel Time Model
+
 - **Type**: RandomForestRegressor
-- **Input**: segment_length, avg_speed, max_speed, vehicle_count, observation_count
-- **Output**: Travel time in seconds
-- **Test R²**: 0.9997, MAE 0.16 s
+- **Predicts**: seconds for the arriving vehicle to actually cross
+- **Input**: segment_length, entry_speed, is_truck, segment_avg_speed, segment_samples
+- **Target**: measured from the vehicle's own FCD samples (last - first + one interval)
 
-### Future Congestion Prediction Model
-- **Type**: RandomForestClassifier
-- **Input**: avg_speed, max_speed, min_speed, std_speed, vehicle_count, observation_count, vehicle_type_diversity, current_congestion
-- **Output**: HIGH/MEDIUM/LOW, 5 minutes ahead
-- **Test accuracy**: 74.7%, macro F1 0.48 (chronological split)
+| Method | MAE |
+|--------|-----|
+| Always predict the mean | 23.27 s |
+| `segment_length / entry_speed` | 3.57 s |
+| **This model** | **1.18 s** |
 
-### Reading those scores honestly
+67% better than the arithmetic estimate, on a mean crossing time of 37 s.
+Chronological split (4,746 train / 1,187 test).
 
-The first two scores look excellent because their targets are computed from
-their own inputs: the congestion class is a threshold on `avg_speed`, and
-travel time is `segment_length / avg_speed`. Those models are recovering a
-formula, not forecasting anything, and their accuracy should not be presented
-as predictive skill.
+### Future Traffic Model
 
-The future-congestion model is the only one doing a genuine forecast. Its
-target is the congestion class actually observed over the next 5 minutes, and
-it is validated on a chronological split so it is tested on later traffic than
-it trained on. 74.7% accuracy with macro F1 0.47 reflects a real task - the
-macro F1 is much lower than accuracy because HIGH congestion is rare (394 of
-35,218 samples) and the model rarely catches it.
+- **Type**: RandomForestRegressor
+- **Predicts**: mean speed on the segment over the next 5 minutes
+- **Input**: avg/max/min/std speed, vehicle_count, observation_count, vehicle_type_diversity, segment_length
+- **Output**: predicted speed, thresholded into HIGH/MEDIUM/LOW
 
-An earlier version derived the "future" label from a rule applied to the
-present values, which made the task trivially solvable and the resulting score
-meaningless.
+| Method | Future speed MAE | Congestion class | Macro F1 |
+|--------|------------------|------------------|----------|
+| Always guess MEDIUM | - | 77.5% | 0.291 |
+| Persistence (same as now) | 1.658 m/s | 73.7% | 0.516 |
+| **This model** | **1.278 m/s** | **83.3%** | **0.593** |
+
+Predicting the class *directly* does not work here: 74% of windows are MEDIUM,
+so a classifier learns to say MEDIUM and scored 74.7% - below the 77.5%
+always-guess baseline. Regressing the speed and thresholding afterwards uses
+the full signal and beats every baseline on both accuracy and macro F1.
+
+### Current congestion is not a model
+
+It is `HIGH if avg_speed < 5, MEDIUM if < 12, else LOW` - a threshold on the
+current window's average speed, applied directly in `segment_fn`.
+
+A classifier was previously trained on it and scored 100% accuracy. That number
+was meaningless: the label is a threshold on `avg_speed`, and `avg_speed` was
+one of the model's inputs, so it was recovering a rule it had been handed. A
+three-line comparison does the same job exactly, with no model to load. The
+same flaw applied to the old travel-time model, whose target was
+`segment_length / avg_speed` - both of them inputs - giving R2 0.9997 for
+learning a division less accurately than a division does it.
+
+Report scores against baselines. A model that cannot beat "always guess the
+most common answer" is not adding anything, however high its accuracy looks.
 
 ---
 

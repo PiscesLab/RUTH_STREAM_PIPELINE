@@ -162,15 +162,22 @@ def build_windowed_dataset(
                 continue
 
             avg = feats["avg_speed"]
+            future_speed = float(np.mean(future))
             feats.update(
                 {
                     "segment_id": segment_id,
                     "timestamp": now,
                     "segment_length": length,
+                    # current state, computed by rule - kept for reference and
+                    # as an input, never as a prediction target
                     "congestion": congestion_label(avg),
                     "current_congestion": congestion_level(avg),
-                    "travel_time": length / avg if avg > 0 else length / 0.1,
-                    "future_congestion": congestion_label(float(np.mean(future))),
+                    # the prediction target: speed actually observed over the
+                    # next horizon. Regression rather than a class - 74% of
+                    # windows are MEDIUM, and that imbalance swamps a
+                    # classifier (see README).
+                    "future_speed": future_speed,
+                    "future_congestion": congestion_label(future_speed),
                 }
             )
             rows.append(feats)
@@ -182,3 +189,80 @@ def build_windowed_dataset(
             f"{horizon_seconds}s horizon."
         )
     return out.fillna(0)
+
+
+# ---------------------------------------------------------------------------
+# Crossing time
+# ---------------------------------------------------------------------------
+
+# FCD sampling interval, used to convert first/last sample times into a
+# crossing duration.
+SAMPLE_INTERVAL_SECONDS = 5
+
+CROSSING_FEATURE_COLUMNS = [
+    "segment_length",
+    "entry_speed",
+    "is_truck",
+    "segment_avg_speed",
+    "segment_samples",
+]
+
+
+def build_crossing_dataset(df, window_seconds=WINDOW_SECONDS):
+    """One row per vehicle crossing a segment, for travel-time prediction.
+
+    The target is how long the vehicle *actually* took, measured from its own
+    samples. Features use only what is knowable when it enters: the segment
+    length, its entry speed, its type, and the traffic already on the segment.
+    Nothing from the rest of the crossing is included, so the model is not
+    handed the answer.
+
+    This replaces the previous target of `segment_length / avg_speed`, which
+    was computed from two of its own input features - a division dressed up as
+    a prediction. Vehicles do not hold their entry speed across a whole
+    segment, so that formula carries a real error (3.6 s MAE on a mean
+    crossing of 37 s) that a model can learn to correct.
+    """
+    speeds_by_segment = {
+        seg: (g["timestamp"].to_numpy(), g["speed_mps"].to_numpy(dtype=float))
+        for seg, g in df.groupby("segment_id", sort=False)
+    }
+
+    visits = (
+        df.groupby(["vehicle_id", "segment_id"])
+        .agg(
+            t_in=("timestamp", "min"),
+            t_out=("timestamp", "max"),
+            samples=("timestamp", "size"),
+            segment_length=("segment_length", "first"),
+            entry_speed=("speed_mps", "first"),
+            vehicle_type=("vehicle_type", "first"),
+        )
+        .reset_index()
+    )
+
+    # a single sample cannot bound a duration
+    visits = visits[visits["samples"] >= 2].copy()
+
+    visits["crossing_time"] = (
+        visits["t_out"] - visits["t_in"] + SAMPLE_INTERVAL_SECONDS
+    )
+    visits["is_truck"] = (visits["vehicle_type"] == "truck").astype(int)
+    visits["naive_estimate"] = visits["segment_length"] / visits["entry_speed"]
+
+    # conditions on the segment strictly before this vehicle arrived
+    seg_avg, seg_n = [], []
+    for segment_id, t_in, entry_speed in zip(
+        visits["segment_id"], visits["t_in"], visits["entry_speed"]
+    ):
+        ts, sp = speeds_by_segment[segment_id]
+        start = np.searchsorted(ts, t_in - window_seconds, side="right")
+        end = np.searchsorted(ts, t_in, side="right")
+        prior = sp[start:end]
+        seg_avg.append(float(prior.mean()) if len(prior) else float(entry_speed))
+        seg_n.append(int(len(prior)))
+
+    visits["segment_avg_speed"] = seg_avg
+    visits["segment_samples"] = seg_n
+
+    return visits.sort_values("t_in").reset_index(drop=True)
