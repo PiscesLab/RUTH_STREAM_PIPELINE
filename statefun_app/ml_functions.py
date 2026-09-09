@@ -27,8 +27,6 @@ TRAVEL_TIME_FEATURES = [
     "segment_length",
     "entry_speed",
     "is_truck",
-    "segment_avg_speed",
-    "segment_samples",
 ]
 
 FUTURE_FEATURES = [
@@ -84,8 +82,7 @@ def _predict(model, feature_names, values):
     return model.predict(frame)[0]
 
 
-def predict_travel_time(segment_length, entry_speed, is_truck,
-                        segment_avg_speed, segment_samples):
+def predict_travel_time(segment_length, entry_speed, is_truck):
     """Seconds for the current vehicle to cross this segment."""
     models = load_models()
     if models is None:
@@ -98,8 +95,6 @@ def predict_travel_time(segment_length, entry_speed, is_truck,
                 "segment_length": segment_length,
                 "entry_speed": entry_speed,
                 "is_truck": int(is_truck),
-                "segment_avg_speed": segment_avg_speed,
-                "segment_samples": segment_samples,
             },
         )
         return max(0.0, float(value))
@@ -162,9 +157,7 @@ def get_ml_predictions(segment_id, segment_length, vehicle_count,
 
     predictions = {}
 
-    travel_time = predict_travel_time(
-        segment_length, entry_speed, is_truck, avg_speed, observation_count
-    )
+    travel_time = predict_travel_time(segment_length, entry_speed, is_truck)
     if travel_time is not None:
         predictions["predicted_travel_time"] = f"{travel_time:.2f}"
 
