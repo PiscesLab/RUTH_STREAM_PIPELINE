@@ -394,6 +394,27 @@ Window time comes from the FCD record's own `timestamp` (simulated seconds),
 not wall clock, so the window covers the same span of traffic regardless of
 how fast the trace is replayed.
 
+### Vehicles vs samples
+
+The window reports two different counts, and the distinction matters:
+
+| Feature | Counts | Meaning |
+|---------|--------|---------|
+| `vehicle_count` | distinct `vehicle_id`s | how many vehicles are on the segment |
+| `observation_count` | FCD samples | how much dwell those vehicles produced |
+
+FCD samples every vehicle every 5 s, so one car crossing a 1 km segment at
+50 km/h yields ~15 readings at the same speed - which is why identical
+`avg_speed` values repeat in the logs. That is the simulator working
+correctly, not a bug.
+
+Across `SanDiegoFCD100.h5`, a 60 s window holds **7.2 samples but only 1.2
+distinct vehicles** on average, and the two differ in 86% of windows
+(correlation 0.63). Treating samples as vehicles overstates density by ~6x and
+conflates two different situations: one slow vehicle dwelling, versus several
+vehicles flowing through. Both are kept as separate features so the models can
+tell them apart.
+
 Change it with `WINDOW_SECONDS`, but note the models are trained against the
 same constant in `ml/features.py` - **change both and retrain**, or the models
 will be served features shaped differently from their training data:
@@ -600,21 +621,21 @@ Trained on `SanDiegoFCD100.h5`: 35,218 windowed samples across 2,639 segments.
 
 ### Congestion Prediction Model
 - **Type**: RandomForestClassifier
-- **Input**: avg_speed, max_speed, min_speed, std_speed, vehicle_count
+- **Input**: avg_speed, max_speed, min_speed, std_speed, vehicle_count, observation_count
 - **Output**: HIGH/MEDIUM/LOW
 - **Test accuracy**: 100%
 
 ### Travel Time Prediction Model
 - **Type**: RandomForestRegressor
-- **Input**: segment_length, avg_speed, max_speed, vehicle_count
+- **Input**: segment_length, avg_speed, max_speed, vehicle_count, observation_count
 - **Output**: Travel time in seconds
 - **Test R²**: 0.9997, MAE 0.16 s
 
 ### Future Congestion Prediction Model
 - **Type**: RandomForestClassifier
-- **Input**: avg_speed, max_speed, min_speed, std_speed, vehicle_count, vehicle_type_diversity, current_congestion
+- **Input**: avg_speed, max_speed, min_speed, std_speed, vehicle_count, observation_count, vehicle_type_diversity, current_congestion
 - **Output**: HIGH/MEDIUM/LOW, 5 minutes ahead
-- **Test accuracy**: 74.7%, macro F1 0.47 (chronological split)
+- **Test accuracy**: 74.7%, macro F1 0.48 (chronological split)
 
 ### Reading those scores honestly
 
