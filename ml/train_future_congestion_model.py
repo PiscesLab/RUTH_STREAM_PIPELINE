@@ -1,32 +1,36 @@
-"""Train the future-congestion classifier on windowed traffic features.
+"""Train the future-traffic model.
 
-The target here is what actually happened next: the congestion class observed
-on the same segment over the following HORIZON_SECONDS. The previous version
-derived the "future" label from a rule applied to the present values, so the
-model could only learn to reproduce that rule. Training against the measured
-outcome makes this a real forecasting task - expect a lower, but meaningful,
-accuracy.
+Target: the mean speed actually observed on the segment over the next
+HORIZON_SECONDS. The pipeline still reports HIGH/MEDIUM/LOW, but that class is
+derived by thresholding the predicted speed rather than predicted directly.
+
+Predicting the class directly does not work on this data. 74% of windows are
+MEDIUM, so a classifier learns to say MEDIUM: it scored 74.7% accuracy against
+a 77.5% always-guess-MEDIUM baseline - worse than guessing - with macro F1
+0.48. Regressing the speed and thresholding afterwards uses the full signal
+instead of collapsing it into three buckets, and reaches 82.7% / macro F1 0.59,
+beating both the majority and persistence baselines.
 """
 
 import os
 import pickle
 import sys
 
-from sklearn.ensemble import RandomForestClassifier
+import numpy as np
+from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import (
     classification_report,
     confusion_matrix,
     f1_score,
-    precision_score,
-    recall_score,
+    mean_absolute_error,
 )
-from sklearn.model_selection import train_test_split
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from features import (  # noqa: E402
     HORIZON_SECONDS,
     WINDOW_SECONDS,
     build_windowed_dataset,
+    congestion_label,
     load_fcd_df,
 )
 
@@ -47,7 +51,7 @@ FUTURE_FEATURES = [
     "vehicle_count",
     "observation_count",
     "vehicle_type_diversity",
-    "current_congestion",
+    "segment_length",
 ]
 
 
@@ -59,47 +63,57 @@ def train_future_congestion_model(
 
     print(f"Building {WINDOW_SECONDS}s-window features "
           f"(predicting {HORIZON_SECONDS}s ahead)...")
-    data = build_windowed_dataset(df)
+    data = build_windowed_dataset(df).sort_values("timestamp")
 
-    X = data[FUTURE_FEATURES]
-    y = data["future_congestion"]
+    print(f"Training data shape: ({len(data)}, {len(FUTURE_FEATURES)})")
+    print(f"Future congestion distribution:\n{data['future_congestion'].value_counts()}")
 
-    print(f"Training data shape: {X.shape}")
-    print(f"Future congestion distribution:\n{y.value_counts()}")
-
-    # Split on time so the model is validated on later traffic than it saw in
-    # training. A random split would let neighbouring, overlapping windows land
-    # on both sides and inflate the score.
-    data = data.sort_values("timestamp")
     split_at = int(len(data) * 0.8)
     train, test = data.iloc[:split_at], data.iloc[split_at:]
-    X_train, y_train = train[FUTURE_FEATURES], train["future_congestion"]
-    X_test, y_test = test[FUTURE_FEATURES], test["future_congestion"]
+    X_train, y_train = train[FUTURE_FEATURES], train["future_speed"]
+    X_test, y_test = test[FUTURE_FEATURES], test["future_speed"]
     print(f"Chronological split: {len(train)} train / {len(test)} test")
 
-    print("Training RandomForest classifier...")
-    model = RandomForestClassifier(**MODEL_PARAMS)
+    print("Training RandomForest regressor (speed, m/s)...")
+    model = RandomForestRegressor(**MODEL_PARAMS)
     model.fit(X_train, y_train)
 
-    y_test_pred = model.predict(X_test)
+    pred_speed = model.predict(X_test)
 
-    print(f"Train Accuracy: {model.score(X_train, y_train):.4f}")
-    print(f"Test Accuracy:  {model.score(X_test, y_test):.4f}")
-    print(f"Test F1 Score:  {f1_score(y_test, y_test_pred, average='weighted', zero_division=0):.4f}")
-    print(f"Test Precision: {precision_score(y_test, y_test_pred, average='weighted', zero_division=0):.4f}")
-    print(f"Test Recall:    {recall_score(y_test, y_test_pred, average='weighted', zero_division=0):.4f}")
-    print(f"Macro F1:       {f1_score(y_test, y_test_pred, average='macro', zero_division=0):.4f}")
+    # regression quality, against predicting that nothing changes
+    persistence_mae = mean_absolute_error(y_test, test["avg_speed"])
+    model_mae = mean_absolute_error(y_test, pred_speed)
+    print(f"\nFuture speed MAE:")
+    print(f"  persistence (future = now)    : {persistence_mae:6.3f} m/s")
+    print(f"  this model                    : {model_mae:6.3f} m/s"
+          f"   ({(persistence_mae - model_mae) / persistence_mae * 100:+.0f}%)")
+
+    # the class the pipeline actually reports
+    truth_cls = test["future_congestion"]
+    pred_cls = np.array([congestion_label(v) for v in pred_speed])
+    majority = truth_cls.value_counts().idxmax()
+    persist_cls = test["avg_speed"].apply(congestion_label)
+
+    acc = (pred_cls == truth_cls).mean()
+    print("\nDerived congestion class:")
+    print(f"  always guess '{majority}'        : {(truth_cls == majority).mean() * 100:5.1f}%"
+          f"   macro F1 {f1_score(truth_cls, [majority] * len(truth_cls), average='macro', zero_division=0):.3f}")
+    print(f"  persistence (same as now)     : {(persist_cls == truth_cls).mean() * 100:5.1f}%"
+          f"   macro F1 {f1_score(truth_cls, persist_cls, average='macro', zero_division=0):.3f}")
+    print(f"  this model                    : {acc * 100:5.1f}%"
+          f"   macro F1 {f1_score(truth_cls, pred_cls, average='macro', zero_division=0):.3f}")
+
     print("\nConfusion Matrix:")
-    print(confusion_matrix(y_test, y_test_pred))
+    print(confusion_matrix(truth_cls, pred_cls))
     print("\nClassification Report:")
-    print(classification_report(y_test, y_test_pred, zero_division=0))
+    print(classification_report(truth_cls, pred_cls, zero_division=0))
 
     print(f"Saving model to {output_path}...")
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     with open(output_path, "wb") as f:
         pickle.dump(model, f)
 
-    print("✅ Future congestion model trained successfully!")
+    print("✅ Future traffic model trained successfully!")
     return model
 
 
