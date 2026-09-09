@@ -43,6 +43,7 @@ FEATURE_COLUMNS = [
     "min_speed",
     "std_speed",
     "vehicle_count",
+    "observation_count",
     "vehicle_type_diversity",
 ]
 
@@ -65,11 +66,20 @@ def congestion_level(avg_speed):
     return 2
 
 
-def summarise_window(speeds, vehicle_types):
+def summarise_window(speeds, vehicle_types, vehicle_ids=None):
     """Describe one window of observations.
 
     Uses the population standard deviation (ddof=0) so it matches what the
-    live pipeline computes incrementally from its running sums.
+    live pipeline computes.
+
+    `vehicle_count` counts *distinct vehicles*, while `observation_count`
+    counts samples. They are far apart: FCD samples every vehicle every 5 s,
+    so one car crossing a long segment yields a dozen readings. Across
+    SanDiegoFCD100.h5 a 60 s window holds 7.2 samples but only 1.2 distinct
+    vehicles on average, and the two differ in 86% of windows. They also mean
+    different things - many samples from one vehicle indicates dwelling
+    (a slow vehicle), while many distinct vehicles indicates density - so both
+    are kept as separate features.
     """
     n = len(speeds)
     if n == 0:
@@ -84,7 +94,8 @@ def summarise_window(speeds, vehicle_types):
         "max_speed": float(np.max(speeds)),
         "min_speed": float(np.min(speeds)),
         "std_speed": float(np.sqrt(variance)),
-        "vehicle_count": int(n),
+        "vehicle_count": int(len(set(vehicle_ids))) if vehicle_ids is not None else int(n),
+        "observation_count": int(n),
         "vehicle_type_diversity": int(len(set(vehicle_types))),
     }
 
@@ -130,13 +141,16 @@ def build_windowed_dataset(
         ts = group["timestamp"].to_numpy()
         speeds = group["speed_mps"].to_numpy(dtype=float)
         types = group["vehicle_type"].to_numpy()
+        ids = group["vehicle_id"].to_numpy()
         length = float(group["segment_length"].iloc[0])
 
         for i in range(len(ts)):
             now = ts[i]
 
             start = np.searchsorted(ts, now - window_seconds, side="right")
-            feats = summarise_window(speeds[start : i + 1], types[start : i + 1])
+            feats = summarise_window(
+                speeds[start : i + 1], types[start : i + 1], ids[start : i + 1]
+            )
             if feats is None:
                 continue
 

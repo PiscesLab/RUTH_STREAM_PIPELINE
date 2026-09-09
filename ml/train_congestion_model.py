@@ -39,6 +39,7 @@ CONGESTION_FEATURES = [
     "min_speed",
     "std_speed",
     "vehicle_count",
+    "observation_count",
 ]
 
 

@@ -45,6 +45,7 @@ FUTURE_FEATURES = [
     "min_speed",
     "std_speed",
     "vehicle_count",
+    "observation_count",
     "vehicle_type_diversity",
     "current_congestion",
 ]

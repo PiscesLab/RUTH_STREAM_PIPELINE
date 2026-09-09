@@ -26,6 +26,7 @@ TRAVEL_TIME_FEATURES = [
     "avg_speed",
     "max_speed",
     "vehicle_count",
+    "observation_count",
 ]
 
 

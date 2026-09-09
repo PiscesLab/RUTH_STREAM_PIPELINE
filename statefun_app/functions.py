@@ -196,13 +196,14 @@ async def vehicle_fn(ctx: Context, message: Message):
     )
 
 
-def _summarise(speeds, vehicle_types):
+def _summarise(speeds, vehicle_types, vehicle_ids):
     """Describe a window of observations.
 
     Mirrors summarise_window() in ml/features.py, which produced the features
     the models were trained on - including the population standard deviation
-    (ddof=0). The two must agree or the models see inputs at serving time that
-    are shaped differently from their training data.
+    (ddof=0), and the distinction between distinct vehicles and raw samples.
+    The two must agree or the models see inputs at serving time that are
+    shaped differently from their training data.
     """
     n = len(speeds)
     avg = sum(speeds) / n
@@ -213,7 +214,8 @@ def _summarise(speeds, vehicle_types):
         "max_speed": max(speeds),
         "min_speed": min(speeds),
         "std_speed": variance ** 0.5,
-        "vehicle_count": n,
+        "vehicle_count": len(set(vehicle_ids)),
+        "observation_count": n,
         "vehicle_type_diversity": len(set(vehicle_types)),
     }
 
@@ -221,7 +223,7 @@ def _summarise(speeds, vehicle_types):
 @functions.bind(
     typename="com.ruth/segment",
     specs=[
-        # observations inside the current window, as JSON: [[ts, speed, type], ...]
+        # observations in the current window, JSON: [[ts, speed, type, vehicle_id], ...]
         ValueSpec(name="window", type=StringType),
         ValueSpec(name="segment_length_m", type=DoubleType),
     ],
@@ -233,6 +235,7 @@ async def segment_fn(ctx: Context, message: Message):
     speed = float(data["speed"])
     segment_length_m = float(data["segment_length_m"])
     vehicle_type = data.get("vehicle_type", "unknown")
+    vehicle_id = data.get("vehicle_id")
     # simulated time from the FCD record, not wall clock: the window has to
     # track traffic time so it behaves the same at any replay speed
     now = float(data["timestamp"])
@@ -240,10 +243,14 @@ async def segment_fn(ctx: Context, message: Message):
     if MODE == "stateless":
         # No per-segment memory: this event is judged entirely on its own,
         # nothing is read from or written to ctx.storage.
-        window = [[now, speed, vehicle_type]]
+        window = [[now, speed, vehicle_type, vehicle_id]]
     else:
-        window = json.loads(ctx.storage.window or "[]")
-        window.append([now, speed, vehicle_type])
+        stored = json.loads(ctx.storage.window or "[]")
+        # Entries written by an older build carry fewer fields. Keep only
+        # well-formed ones so a deploy over live state heals itself within one
+        # window rather than failing on every event for that segment.
+        window = [e for e in stored if isinstance(e, list) and len(e) == 4]
+        window.append([now, speed, vehicle_type, vehicle_id])
 
         # drop observations that have aged out of the window
         cutoff = now - WINDOW_SECONDS
@@ -254,12 +261,15 @@ async def segment_fn(ctx: Context, message: Message):
         ctx.storage.window = json.dumps(window)
         ctx.storage.segment_length_m = segment_length_m
 
-    stats = _summarise([e[1] for e in window], [e[2] for e in window])
+    stats = _summarise(
+        [e[1] for e in window], [e[2] for e in window], [e[3] for e in window]
+    )
     avg_speed = stats["avg_speed"]
     max_speed = stats["max_speed"]
     min_speed = stats["min_speed"]
     std_speed = stats["std_speed"]
     count = stats["vehicle_count"]
+    observation_count = stats["observation_count"]
     vehicle_type_diversity = stats["vehicle_type_diversity"]
     vehicle_types_str = ",".join(sorted({e[2] for e in window}))
 
@@ -273,7 +283,8 @@ async def segment_fn(ctx: Context, message: Message):
 
     log(
         f"[{MODE}] segment={data['segment_id']} "
-        f"count={count} avg_speed={avg_speed:.2f} congestion={congestion} "
+        f"vehicles={count} samples={observation_count} "
+        f"avg_speed={avg_speed:.2f} congestion={congestion} "
         f"vehicle_types={vehicle_types_str}"
     )
 
@@ -283,6 +294,7 @@ async def segment_fn(ctx: Context, message: Message):
             data['segment_id'],
             segment_length_m,
             count,
+            observation_count,
             avg_speed,
             max_speed,
             min_speed,
@@ -302,6 +314,7 @@ async def segment_fn(ctx: Context, message: Message):
         "segment_length_m": segment_length_m,
         "timestamp": data["timestamp"],
         "vehicle_count": count,
+        "observation_count": observation_count,
         "current_congestion_level": congestion_level,
         "vehicle_type_diversity": vehicle_type_diversity,
     }
@@ -343,6 +356,7 @@ async def travel_time_fn(ctx: Context, message: Message):
     if MODE == "predictive":
         try:
             vehicle_count = int(data.get("vehicle_count", 1)) or 1
+            observation_count = int(data.get("observation_count", vehicle_count))
             vehicle_type_diversity = int(data.get("vehicle_type_diversity", 1))
             current_congestion_level = int(data.get("current_congestion_level", 1))
             max_speed = float(data.get("max_speed_mps", avg_speed))
@@ -353,6 +367,7 @@ async def travel_time_fn(ctx: Context, message: Message):
                 data['segment_id'],
                 segment_length,
                 vehicle_count,
+                observation_count,
                 avg_speed,
                 max_speed,
                 min_speed,
