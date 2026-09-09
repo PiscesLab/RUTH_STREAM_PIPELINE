@@ -4,12 +4,12 @@ Target: the mean speed actually observed on the segment over the next
 HORIZON_SECONDS. The pipeline still reports HIGH/MEDIUM/LOW, but that class is
 derived by thresholding the predicted speed rather than predicted directly.
 
-Predicting the class directly does not work on this data. 74% of windows are
-MEDIUM, so a classifier learns to say MEDIUM: it scored 74.7% accuracy against
-a 77.5% always-guess-MEDIUM baseline - worse than guessing - with macro F1
-0.48. Regressing the speed and thresholding afterwards uses the full signal
-instead of collapsing it into three buckets, and reaches 82.7% / macro F1 0.59,
-beating both the majority and persistence baselines.
+Predicting the class directly does not work on this data. MEDIUM dominates,
+so a classifier learns to say MEDIUM: it scored 74.7% accuracy against a 77.5%
+always-guess-MEDIUM baseline - worse than guessing - with macro F1 0.48.
+Regressing the speed and thresholding afterwards uses the full signal instead
+of collapsing it into three buckets, and beats both the majority and
+persistence baselines on every held-out set (see README).
 """
 
 import os
