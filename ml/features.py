@@ -199,12 +199,15 @@ def build_windowed_dataset(
 # crossing duration.
 SAMPLE_INTERVAL_SECONDS = 5
 
+# Only what measurably helps. Segment context (segment_avg_speed,
+# segment_samples) is still computed and available, but an ablation showed it
+# makes predictions slightly worse (1.137s -> 1.170s MAE), so it is not fed to
+# the model. Length and entry speed carry the signal; vehicle type adds a
+# little because trucks accelerate and corner differently.
 CROSSING_FEATURE_COLUMNS = [
     "segment_length",
     "entry_speed",
     "is_truck",
-    "segment_avg_speed",
-    "segment_samples",
 ]
 
 
