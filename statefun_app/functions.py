@@ -279,7 +279,6 @@ async def segment_fn(ctx: Context, message: Message):
         congestion = "MEDIUM"
     else:
         congestion = "LOW"
-    congestion_level = 0 if congestion == "HIGH" else (1 if congestion == "MEDIUM" else 2)
 
     log(
         f"[{MODE}] segment={data['segment_id']} "
@@ -313,18 +312,14 @@ async def segment_fn(ctx: Context, message: Message):
                     f"in 5min: speed={ml_preds['predicted_future_speed']}m/s "
                     f"congestion={ml_preds['predicted_next_congestion']}")
 
+    # Only what travel_time_fn reads. It used to carry the full window
+    # statistics for inference, but the models moved into segment_fn (where the
+    # arriving vehicle's own speed and type are available), leaving eight fields
+    # that were serialised on every event and never read.
     travel_msg = {
         "segment_id": data["segment_id"],
         "avg_speed_mps": avg_speed,
-        "max_speed_mps": max_speed,
-        "min_speed_mps": min_speed,
-        "std_speed_mps": std_speed,
         "segment_length_m": segment_length_m,
-        "timestamp": data["timestamp"],
-        "vehicle_count": count,
-        "observation_count": observation_count,
-        "current_congestion_level": congestion_level,
-        "vehicle_type_diversity": vehicle_type_diversity,
     }
 
     ctx.send(
