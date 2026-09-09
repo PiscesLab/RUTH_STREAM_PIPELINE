@@ -35,6 +35,7 @@ RUTH_STREAM_PIPELINE/
 │   │   ├── congestion_model.pkl
 │   │   ├── travel_time_model.pkl
 │   │   └── future_congestion_model.pkl
+│   ├── features.py                      # Windowed feature definition (shared)
 │   ├── train_congestion_model.py        # Train congestion classifier
 │   ├── train_travel_time_model.py       # Train travel time regressor
 │   ├── train_future_congestion_model.py # Train future congestion classifier
@@ -46,6 +47,8 @@ RUTH_STREAM_PIPELINE/
 │   ├── functions.py                     # StateFun functions for stream processing
 │   ├── ml_functions.py                  # ML model loading and predictions
 │   └── module.yaml                      # StateFun module configuration
+├── benchmarks/
+│   └── run_modes.py                     # Mode comparison benchmark (RQ3)
 ├── inputfiles/
 │   └── SanDiegoFCD100.h5                # Sample traffic data (H5 format)
 ├── requirements.txt                     # Python dependencies
@@ -358,6 +361,49 @@ segment=49147500_49377870 count=6 avg_speed=11.78 congestion=MEDIUM
 
 ---
 
+## The 60-Second Window
+
+A segment is described by the traffic seen in the **last 60 seconds of
+simulated time**, not by everything it has ever seen.
+
+This matters because an all-time average stops responding. After a few hundred
+events a new observation moves the average by well under a percent, so the twin
+reports history instead of current conditions - and `max_speed`, `min_speed`
+and the observed vehicle types get stuck permanently on whatever passed
+earliest.
+
+The window size was chosen by measurement, not assumption. Using
+`SanDiegoFCD100.h5` (3.5 h of traffic, 5 s sampling), each estimator was scored
+against what actually happened on that segment over the following 5 minutes:
+
+| Estimator | Speed error (MAE) | Congestion label correct |
+|-----------|-------------------|--------------------------|
+| Cumulative (previous behaviour) | 2.03 m/s | 76.5% |
+| 30 s window | 1.20 m/s | 83.8% |
+| **60 s window** | **1.20 m/s** | **83.5%** |
+| 5 min window | 1.33 m/s | 81.2% |
+| 15 min window | 1.71 m/s | 78.2% |
+
+30 s and 60 s are effectively tied, and everything from 30 s to 120 s scores
+within about a point. 60 s sits in the middle of that flat region rather than
+at its edge, so it is the least sensitive to a different sampling rate or
+vehicle count. A 60 s window holds a median of 6 observations, and only ~14%
+of windows contain a single one, so sparsity is not a problem at this size.
+
+Window time comes from the FCD record's own `timestamp` (simulated seconds),
+not wall clock, so the window covers the same span of traffic regardless of
+how fast the trace is replayed.
+
+Change it with `WINDOW_SECONDS`, but note the models are trained against the
+same constant in `ml/features.py` - **change both and retrain**, or the models
+will be served features shaped differently from their training data:
+
+```bash
+WINDOW_SECONDS=30 PIPELINE_MODE=predictive python3 -u functions.py
+```
+
+---
+
 ## Processing Modes
 
 The pipeline can run in three modes, selected with the `PIPELINE_MODE`
@@ -402,8 +448,16 @@ attached to every event.
 
 | Endpoint | Purpose |
 |----------|---------|
-| `GET /metrics` | Current throughput and latency (avg, p50, p95, p99) |
+| `GET /metrics` | Throughput, latency (avg/p50/p95/p99), CPU and memory |
+| `GET /metrics.json` | Same numbers as JSON, for scripted runs |
 | `GET /metrics/reset` | Zero the counters before a measured run |
+
+CPU and memory cover **the Python app process only** - not Kafka and not the
+Flink workers. That is the right scope for comparing modes, since the
+differences between modes (state tracking, ML inference) all happen in this
+process while the rest of the pipeline is identical. CPU is reported as
+percentage of the event-processing window, so it can exceed 100% when more
+than one core is busy.
 
 ### Running one measurement
 
@@ -435,10 +489,33 @@ Example output:
  latency p50   : 176.85 ms
  latency p95   : 341.43 ms
  latency p99   : 366.18 ms
+ cpu used      : 0.92 s
+ cpu while busy: 113.2 %
+ memory now    : 54.0 MB
+ memory peak   : 54.0 MB
 ======================================
 ```
 
-### Comparing modes
+### Comparing modes automatically
+
+`benchmarks/run_modes.py` runs the whole comparison: for each mode it starts
+the app, sends a warm-up batch, runs N measured batches, and prints the median
+across runs. Kafka, Zookeeper and the StateFun containers must already be up;
+nothing else should be listening on port 8000.
+
+```bash
+cd /users/Dinisha/RUTH_STREAM_PIPELINE
+source statefun-venv/bin/activate
+
+python3 benchmarks/run_modes.py                          # 3 modes, 3 runs, 1000 events
+python3 benchmarks/run_modes.py --runs 5 --events 2000
+python3 benchmarks/run_modes.py --modes stateless stateful
+```
+
+It writes the per-run numbers to `/tmp/benchmark_results.json` alongside the
+printed medians.
+
+### Doing it by hand
 
 Restart the app under each mode in turn and run the same measurement with the
 same `--limit`, so the modes see identical load. Notes that matter for valid
@@ -449,11 +526,16 @@ numbers:
   reset and run the measured batch.
 - **Repeat each run ~3 times and take the median** - a single run is noisy.
 - **Reset between runs** (`/metrics/reset`), or counts accumulate across runs.
+- **Keep `QUIET=1`** for measured runs, and the same setting across modes.
 - **Restarting the StateFun containers replays the whole topic** from the
   beginning, since checkpointing is not configured. If old backlog gets mixed
   into a run, latency readings become meaningless (stale `sent_at_ms` values).
   For a clean slate, stop Kafka/Zookeeper, delete `/tmp/kafka-logs` and
   `/tmp/zookeeper`, then restart them.
+
+In `predictive` mode the scikit-learn calls are synchronous and block the
+asyncio event loop, so `/metrics` can be slow to answer while a batch is being
+processed. Retry rather than treating it as a failure.
 
 ---
 
@@ -508,24 +590,50 @@ then restart the StateFun containers.
 
 ## ML Models Details
 
-These run only in `predictive` mode. They are fed the speed statistics actually
-observed on each segment (running avg/max/min/std) and the real vehicle-type
-mix, tracked as StateFun state in `segment_fn`.
+These run only in `predictive` mode, on the 60-second window features
+described above. `ml/features.py` is the single definition of those features
+and is used by all three training scripts; `segment_fn` computes the same
+values at serving time, so a model is served inputs shaped exactly like its
+training data.
+
+Trained on `SanDiegoFCD100.h5`: 35,218 windowed samples across 2,639 segments.
 
 ### Congestion Prediction Model
 - **Type**: RandomForestClassifier
 - **Input**: avg_speed, max_speed, min_speed, std_speed, vehicle_count
 - **Output**: HIGH/MEDIUM/LOW
+- **Test accuracy**: 100%
 
 ### Travel Time Prediction Model
 - **Type**: RandomForestRegressor
 - **Input**: segment_length, avg_speed, max_speed, vehicle_count
 - **Output**: Travel time in seconds
+- **Test R²**: 0.9997, MAE 0.16 s
 
 ### Future Congestion Prediction Model
 - **Type**: RandomForestClassifier
 - **Input**: avg_speed, max_speed, min_speed, std_speed, vehicle_count, vehicle_type_diversity, current_congestion
-- **Output**: HIGH/MEDIUM/LOW (next state)
+- **Output**: HIGH/MEDIUM/LOW, 5 minutes ahead
+- **Test accuracy**: 74.7%, macro F1 0.47 (chronological split)
+
+### Reading those scores honestly
+
+The first two scores look excellent because their targets are computed from
+their own inputs: the congestion class is a threshold on `avg_speed`, and
+travel time is `segment_length / avg_speed`. Those models are recovering a
+formula, not forecasting anything, and their accuracy should not be presented
+as predictive skill.
+
+The future-congestion model is the only one doing a genuine forecast. Its
+target is the congestion class actually observed over the next 5 minutes, and
+it is validated on a chronological split so it is tested on later traffic than
+it trained on. 74.7% accuracy with macro F1 0.47 reflects a real task - the
+macro F1 is much lower than accuracy because HIGH congestion is rare (394 of
+35,218 samples) and the model rarely catches it.
+
+An earlier version derived the "future" label from a rule applied to the
+present values, which made the task trivially solvable and the resulting score
+meaningless.
 
 ---
 

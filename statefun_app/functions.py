@@ -15,6 +15,17 @@ MODE = os.environ.get("PIPELINE_MODE", "predictive").lower()
 if MODE not in ("stateless", "stateful", "predictive"):
     MODE = "predictive"
 
+# A segment is described by the traffic seen in the last WINDOW_SECONDS of
+# simulated time, so the twin reflects current conditions rather than an
+# average over everything it has ever seen. Must stay in step with
+# WINDOW_SECONDS in ml/features.py, which the models are trained against.
+WINDOW_SECONDS = int(os.environ.get("WINDOW_SECONDS", "60"))
+
+# Safety bound on stored observations per segment. The busiest segment in
+# SanDiegoFCD100.h5 sees 36 events in a 60s window, so this is far above what
+# the data produces; it only guards against a pathological input.
+MAX_WINDOW_EVENTS = 500
+
 # Per-event console logging is off by default: printing a line per event is
 # slow enough to dominate the measurement we are trying to take. Set QUIET=0
 # to see the per-event lines while debugging correctness.
@@ -28,7 +39,45 @@ def log(message):
 
 # Throughput/latency measurement. Read it on demand from the /metrics
 # endpoint rather than printing it into the event stream.
-_metrics = {"count": 0, "latencies_ms": [], "start_time": None, "last_time": None}
+_metrics = {
+    "count": 0,
+    "latencies_ms": [],
+    "start_time": None,
+    "last_time": None,
+    "cpu_at_reset_s": None,
+    # distinct segment ids seen since reset = the active twin population.
+    # Held here as measurement instrumentation, not pipeline state, so the
+    # count is available in every mode including stateless.
+    "segments_seen": set(),
+}
+
+_CLOCK_TICKS = os.sysconf("SC_CLK_TCK")
+
+
+def _cpu_time_s():
+    """CPU seconds (user+system) consumed by this process so far."""
+    try:
+        with open("/proc/self/stat") as f:
+            fields = f.read().rsplit(")", 1)[1].split()
+        # after the comm field: state is fields[0], so utime/stime are 11/12
+        return (int(fields[11]) + int(fields[12])) / _CLOCK_TICKS
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def _memory_mb():
+    """Current and peak resident memory of this process, in MB."""
+    current = peak = None
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    current = int(line.split()[1]) / 1024.0
+                elif line.startswith("VmHWM:"):
+                    peak = int(line.split()[1]) / 1024.0
+    except (OSError, IndexError, ValueError):
+        pass
+    return current, peak
 
 
 # One short heartbeat line per this many events, so the console visibly shows
@@ -42,12 +91,18 @@ def _record_metrics(event):
 
     if _metrics["start_time"] is None:
         _metrics["start_time"] = now
+        if _metrics["cpu_at_reset_s"] is None:
+            _metrics["cpu_at_reset_s"] = _cpu_time_s()
     _metrics["count"] += 1
     _metrics["last_time"] = now
 
     sent_at_ms = event.get("sent_at_ms")
     if sent_at_ms is not None:
         _metrics["latencies_ms"].append((now * 1000) - sent_at_ms)
+
+    segment_id = event.get("road", {}).get("segment_id")
+    if segment_id is not None:
+        _metrics["segments_seen"].add(segment_id)
 
     if _metrics["count"] % _HEARTBEAT_EVERY == 0:
         print(f"  ... processed {_metrics['count']} events (mode={MODE})")
@@ -70,9 +125,23 @@ def _metrics_summary():
     elapsed = max(_metrics["last_time"] - _metrics["start_time"], 1e-9)
     latencies = sorted(_metrics["latencies_ms"])
 
+    # CPU burned since the last reset. Idle time costs ~no CPU, so dividing by
+    # the event-processing span gives CPU use while actually working. This can
+    # exceed 100% when more than one core is busy.
+    cpu_used_s = None
+    cpu_pct = None
+    cpu_now = _cpu_time_s()
+    if cpu_now is not None and _metrics["cpu_at_reset_s"] is not None:
+        cpu_used_s = max(cpu_now - _metrics["cpu_at_reset_s"], 0.0)
+        cpu_pct = round((cpu_used_s / elapsed) * 100.0, 1)
+        cpu_used_s = round(cpu_used_s, 3)
+
+    mem_current, mem_peak = _memory_mb()
+
     return {
         "mode": MODE,
         "events": count,
+        "active_twins": len(_metrics["segments_seen"]),
         "elapsed_s": round(elapsed, 3),
         "throughput_eps": round(count / elapsed, 1),
         "latency_ms": {
@@ -80,6 +149,11 @@ def _metrics_summary():
             "p50": round(_percentile(latencies, 50), 2) if latencies else None,
             "p95": round(_percentile(latencies, 95), 2) if latencies else None,
             "p99": round(_percentile(latencies, 99), 2) if latencies else None,
+        },
+        "cpu": {"used_s": cpu_used_s, "pct_while_working": cpu_pct},
+        "memory_mb": {
+            "current": round(mem_current, 1) if mem_current is not None else None,
+            "peak": round(mem_peak, 1) if mem_peak is not None else None,
         },
     }
 
@@ -122,16 +196,34 @@ async def vehicle_fn(ctx: Context, message: Message):
     )
 
 
+def _summarise(speeds, vehicle_types):
+    """Describe a window of observations.
+
+    Mirrors summarise_window() in ml/features.py, which produced the features
+    the models were trained on - including the population standard deviation
+    (ddof=0). The two must agree or the models see inputs at serving time that
+    are shaped differently from their training data.
+    """
+    n = len(speeds)
+    avg = sum(speeds) / n
+    mean_sq = sum(s * s for s in speeds) / n
+    variance = max(0.0, mean_sq - avg * avg)
+    return {
+        "avg_speed": avg,
+        "max_speed": max(speeds),
+        "min_speed": min(speeds),
+        "std_speed": variance ** 0.5,
+        "vehicle_count": n,
+        "vehicle_type_diversity": len(set(vehicle_types)),
+    }
+
+
 @functions.bind(
     typename="com.ruth/segment",
     specs=[
-        ValueSpec(name="count", type=IntType),
-        ValueSpec(name="speed_sum", type=DoubleType),
-        ValueSpec(name="speed_sum_sq", type=DoubleType),
-        ValueSpec(name="max_speed", type=DoubleType),
-        ValueSpec(name="min_speed", type=DoubleType),
+        # observations inside the current window, as JSON: [[ts, speed, type], ...]
+        ValueSpec(name="window", type=StringType),
         ValueSpec(name="segment_length_m", type=DoubleType),
-        ValueSpec(name="vehicle_types", type=StringType),
     ],
 )
 async def segment_fn(ctx: Context, message: Message):
@@ -140,49 +232,36 @@ async def segment_fn(ctx: Context, message: Message):
 
     speed = float(data["speed"])
     segment_length_m = float(data["segment_length_m"])
+    vehicle_type = data.get("vehicle_type", "unknown")
+    # simulated time from the FCD record, not wall clock: the window has to
+    # track traffic time so it behaves the same at any replay speed
+    now = float(data["timestamp"])
 
     if MODE == "stateless":
         # No per-segment memory: this event is judged entirely on its own,
         # nothing is read from or written to ctx.storage.
-        count = 1
-        avg_speed = speed
-        max_speed = speed
-        min_speed = speed
-        std_speed = 0.0
-        vehicle_type_diversity = 1
-        vehicle_types_str = data.get("vehicle_type", "unknown")
+        window = [[now, speed, vehicle_type]]
     else:
-        count = ctx.storage.count or 0
-        speed_sum = ctx.storage.speed_sum or 0.0
-        speed_sum_sq = ctx.storage.speed_sum_sq or 0.0
-        prev_max = ctx.storage.max_speed
-        prev_min = ctx.storage.min_speed
+        window = json.loads(ctx.storage.window or "[]")
+        window.append([now, speed, vehicle_type])
 
-        count += 1
-        speed_sum += speed
-        speed_sum_sq += speed * speed
-        max_speed = speed if prev_max is None else max(prev_max, speed)
-        min_speed = speed if prev_min is None else min(prev_min, speed)
+        # drop observations that have aged out of the window
+        cutoff = now - WINDOW_SECONDS
+        window = [e for e in window if e[0] > cutoff]
+        if len(window) > MAX_WINDOW_EVENTS:
+            window = window[-MAX_WINDOW_EVENTS:]
 
-        # track the distinct vehicle types observed on this segment so far
-        seen_types = set(filter(None, (ctx.storage.vehicle_types or "").split(",")))
-        seen_types.add(data.get("vehicle_type", "unknown"))
-        vehicle_type_diversity = len(seen_types)
-        vehicle_types_str = ",".join(sorted(seen_types))
-
-        # persist the updated state for this segment
+        ctx.storage.window = json.dumps(window)
         ctx.storage.segment_length_m = segment_length_m
-        ctx.storage.count = count
-        ctx.storage.speed_sum = speed_sum
-        ctx.storage.speed_sum_sq = speed_sum_sq
-        ctx.storage.max_speed = max_speed
-        ctx.storage.min_speed = min_speed
-        ctx.storage.vehicle_types = vehicle_types_str
 
-        avg_speed = speed_sum / count
-        # population variance from the running sums; clamp for float rounding
-        variance = max(0.0, (speed_sum_sq / count) - (avg_speed ** 2))
-        std_speed = variance ** 0.5
+    stats = _summarise([e[1] for e in window], [e[2] for e in window])
+    avg_speed = stats["avg_speed"]
+    max_speed = stats["max_speed"]
+    min_speed = stats["min_speed"]
+    std_speed = stats["std_speed"]
+    count = stats["vehicle_count"]
+    vehicle_type_diversity = stats["vehicle_type_diversity"]
+    vehicle_types_str = ",".join(sorted({e[2] for e in window}))
 
     if avg_speed < 5:
         congestion = "HIGH"
@@ -307,19 +386,33 @@ async def metrics_handler(request):
         return web.Response(text=f"mode={s['mode']}\nno events processed yet\n")
 
     lat = s["latency_ms"]
+    cpu = s["cpu"]
+    mem = s["memory_mb"]
     text = (
         "======================================\n"
         f" mode          : {s['mode']}\n"
         f" events        : {s['events']}\n"
+        f" active twins  : {s['active_twins']}\n"
         f" elapsed       : {s['elapsed_s']} s\n"
         f" throughput    : {s['throughput_eps']} events/s\n"
         f" latency avg   : {lat['avg']} ms\n"
         f" latency p50   : {lat['p50']} ms\n"
         f" latency p95   : {lat['p95']} ms\n"
         f" latency p99   : {lat['p99']} ms\n"
+        f" cpu used      : {cpu['used_s']} s\n"
+        f" cpu while busy: {cpu['pct_while_working']} %\n"
+        f" memory now    : {mem['current']} MB\n"
+        f" memory peak   : {mem['peak']} MB\n"
         "======================================\n"
+        " (cpu/memory are for this Python app only,\n"
+        "  not Kafka or the Flink workers)\n"
     )
     return web.Response(text=text)
+
+
+async def metrics_json_handler(request):
+    """Same numbers as /metrics, as JSON for scripted benchmark runs."""
+    return web.json_response(_metrics_summary())
 
 
 async def metrics_reset_handler(request):
@@ -328,6 +421,8 @@ async def metrics_reset_handler(request):
     _metrics["latencies_ms"] = []
     _metrics["start_time"] = None
     _metrics["last_time"] = None
+    _metrics["cpu_at_reset_s"] = _cpu_time_s()
+    _metrics["segments_seen"] = set()
     return web.Response(text=f"metrics reset (mode={MODE})\n")
 
 
@@ -335,6 +430,7 @@ app = web.Application()
 app.add_routes([
     web.post("/statefun", handle),
     web.get("/metrics", metrics_handler),
+    web.get("/metrics.json", metrics_json_handler),
     web.get("/metrics/reset", metrics_reset_handler),
 ])
 
