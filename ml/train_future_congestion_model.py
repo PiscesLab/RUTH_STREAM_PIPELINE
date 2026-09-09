@@ -40,7 +40,9 @@ MODEL_PARAMS = dict(
     min_samples_split=5,
     min_samples_leaf=2,
     random_state=42,
-    n_jobs=1,
+    # fit across all cores; the saved model is switched to n_jobs=1 below so
+    # that single-row inference in the pipeline does not fan out per prediction
+    n_jobs=-1,
 )
 
 FUTURE_FEATURES = [
@@ -55,8 +57,25 @@ FUTURE_FEATURES = [
 ]
 
 
+def _evaluate(model, data, label):
+    """Score the model on a dataset it was not trained on."""
+    pred = model.predict(data[FUTURE_FEATURES])
+    persistence = mean_absolute_error(data["future_speed"], data["avg_speed"])
+    model_mae = mean_absolute_error(data["future_speed"], pred)
+    truth_cls = data["future_congestion"]
+    pred_cls = np.array([congestion_label(v) for v in pred])
+    majority = truth_cls.value_counts().idxmax()
+    print(f"\n  {label}  (n={len(data):,})")
+    print(f"    speed MAE   persistence {persistence:6.3f} -> model {model_mae:6.3f} m/s"
+          f"  ({(persistence - model_mae) / persistence * 100:+.0f}%)")
+    print(f"    class acc   majority {(truth_cls == majority).mean() * 100:5.1f}%"
+          f"  -> model {(pred_cls == truth_cls).mean() * 100:5.1f}%"
+          f"   macro F1 {f1_score(truth_cls, pred_cls, average='macro', zero_division=0):.3f}")
+
+
 def train_future_congestion_model(
-    h5_path: str, output_path: str = "models/future_congestion_model.pkl"
+    h5_path: str, output_path: str = "models/future_congestion_model.pkl",
+    holdout_paths=None,
 ):
     print("Loading FCD data...")
     df = load_fcd_df(h5_path)
@@ -108,6 +127,17 @@ def train_future_congestion_model(
     print("\nClassification Report:")
     print(classification_report(truth_cls, pred_cls, zero_division=0))
 
+    # the real test: data the model has never seen, ideally another road network
+    for path in holdout_paths or []:
+        try:
+            held = build_windowed_dataset(load_fcd_df(path))
+            _evaluate(model, held, f"HELD OUT: {os.path.basename(path)}")
+        except Exception as exc:
+            print(f"\n  HELD OUT: {os.path.basename(path)} - skipped ({exc})")
+
+    # single-row predictions in the pipeline are faster on one core
+    model.set_params(n_jobs=1)
+
     print(f"Saving model to {output_path}...")
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     with open(output_path, "wb") as f:
@@ -118,5 +148,5 @@ def train_future_congestion_model(
 
 
 if __name__ == "__main__":
-    h5_file = sys.argv[1] if len(sys.argv) > 1 else "../inputfiles/SanDiegoFCD100.h5"
-    train_future_congestion_model(h5_file)
+    h5_file = sys.argv[1] if len(sys.argv) > 1 else "../inputfiles/SanDiegoFCD1k.h5"
+    train_future_congestion_model(h5_file, holdout_paths=sys.argv[2:])

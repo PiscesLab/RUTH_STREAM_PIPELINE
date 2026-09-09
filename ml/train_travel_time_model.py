@@ -31,11 +31,22 @@ MODEL_PARAMS = dict(
     min_samples_split=5,
     min_samples_leaf=2,
     random_state=42,
-    n_jobs=1,
+    # fit across all cores; the saved model is switched to n_jobs=1 below so
+    # that single-row inference in the pipeline does not fan out per prediction
+    n_jobs=-1,
 )
 
 
-def train_travel_time_model(h5_path: str, output_path: str = "models/travel_time_model.pkl"):
+def _evaluate(model, data, label):
+    """Score the model on a dataset it was not trained on."""
+    pred = model.predict(data[CROSSING_FEATURE_COLUMNS])
+    print(f"\n  {label}  (n={len(data):,})")
+    print(f"    length/entry_speed {mean_absolute_error(data['crossing_time'], data['naive_estimate']):6.2f}s"
+          f"  -> model {mean_absolute_error(data['crossing_time'], pred):6.2f}s MAE")
+
+
+def train_travel_time_model(h5_path: str, output_path: str = "models/travel_time_model.pkl",
+                            holdout_paths=None):
     print("Loading FCD data...")
     df = load_fcd_df(h5_path)
 
@@ -85,6 +96,16 @@ def train_travel_time_model(h5_path: str, output_path: str = "models/travel_time
     ):
         print(f"  {name:<20}{imp:.3f}")
 
+    for path in holdout_paths or []:
+        try:
+            held = build_crossing_dataset(load_fcd_df(path))
+            _evaluate(model, held, f"HELD OUT: {os.path.basename(path)}")
+        except Exception as exc:
+            print(f"\n  HELD OUT: {os.path.basename(path)} - skipped ({exc})")
+
+    # single-row predictions in the pipeline are faster on one core
+    model.set_params(n_jobs=1)
+
     print(f"\nSaving model to {output_path}...")
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     with open(output_path, "wb") as f:
@@ -95,5 +116,5 @@ def train_travel_time_model(h5_path: str, output_path: str = "models/travel_time
 
 
 if __name__ == "__main__":
-    h5_file = sys.argv[1] if len(sys.argv) > 1 else "../inputfiles/SanDiegoFCD100.h5"
-    train_travel_time_model(h5_file)
+    h5_file = sys.argv[1] if len(sys.argv) > 1 else "../inputfiles/SanDiegoFCD1k.h5"
+    train_travel_time_model(h5_file, holdout_paths=sys.argv[2:])

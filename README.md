@@ -47,8 +47,10 @@ RUTH_STREAM_PIPELINE/
 │   └── module.yaml                      # StateFun module configuration
 ├── benchmarks/
 │   └── run_modes.py                     # Mode comparison benchmark (RQ3)
-├── inputfiles/
-│   └── SanDiegoFCD100.h5                # Sample traffic data (H5 format)
+├── inputfiles/                          # FCD datasets (H5)
+│   ├── SanDiegoFCD1k.h5                 #   training set (992 vehicles)
+│   ├── lamesa_FCD.h5                    #   held out - different city
+│   └── SanDiegoFCD100.h5                #   held out
 ├── requirements.txt                     # Python dependencies
 └── README.md                            # This file
 ```
@@ -177,7 +179,7 @@ ls -lh inputfiles/*.h5
 
 Once all prerequisites are installed, follow these steps:
 
-1. **Train ML Models** → `python3 ml/train_all_models.py inputfiles/SanDiegoFCD100.h5`
+1. **Train ML Models** → `cd ml && python3 train_all_models.py ../inputfiles/SanDiegoFCD1k.h5 ../inputfiles/lamesa_FCD.h5`
 2. **Start Pipeline** → Open 7 terminals and run commands below (Terminals 1-7)
 3. **Run Producer** → Send traffic data to Kafka
 4. **Monitor Output** → Watch Terminal 6 for real-time predictions
@@ -193,8 +195,13 @@ Before running the pipeline, train the ML models on your traffic data:
 ```bash
 cd /users/Dinisha/RUTH_STREAM_PIPELINE
 source statefun-venv/bin/activate
-python3 ml/train_all_models.py inputfiles/SanDiegoFCD100.h5
+cd ml
+python3 train_all_models.py ../inputfiles/SanDiegoFCD1k.h5 \
+    ../inputfiles/lamesa_FCD.h5 ../inputfiles/SanDiegoFCD100.h5
 ```
+
+The first file is trained on; the rest are only evaluated. See
+[ML Models Details](#ml-models-details) for why the holdouts matter.
 
 **Output:**
 - `ml/models/travel_time_model.pkl` - crossing-time regressor
@@ -626,21 +633,40 @@ questions you cannot answer by looking at the present state:
 - **What will this road be like in 5 minutes?** Needed to route around
   congestion that is building, rather than reacting after it has formed.
 
+### Training and evaluation data
+
+Models are trained on **SanDiegoFCD1k.h5** (398k events, 992 vehicles) and
+scored on datasets they never saw - including **lamesa_FCD.h5**, a different
+city with a different road network. Scoring only inside the run you trained on
+overstates how far a model travels.
+
+```bash
+cd ml
+python3 train_all_models.py ../inputfiles/SanDiegoFCD1k.h5 \
+    ../inputfiles/lamesa_FCD.h5 ../inputfiles/SanDiegoFCD100.h5
+```
+
+The first file trains; every file after it is only evaluated.
+
+| Dataset | Events | Vehicles | Role |
+|---------|--------|----------|------|
+| SanDiegoFCD1k.h5 | 398k | 992 | training |
+| lamesa_FCD.h5 | 2k | 17 | held out - different city |
+| SanDiegoFCD100.h5 | 44k | 99 | held out |
+| fcd_history1.h5 | 128k | 2,443 | out of scope, see below |
+
 ### Travel Time Model
 
 - **Type**: RandomForestRegressor
 - **Predicts**: seconds for the arriving vehicle to actually cross
-- **Input**: segment_length, entry_speed, is_truck, segment_avg_speed, segment_samples
-- **Target**: measured from the vehicle's own FCD samples (last - first + one interval)
+- **Input**: segment_length, entry_speed, is_truck
+- **Target**: measured from the vehicle's own FCD samples
 
-| Method | MAE |
-|--------|-----|
-| Always predict the mean | 23.27 s |
-| `segment_length / entry_speed` | 3.57 s |
-| **This model** | **1.18 s** |
-
-67% better than the arithmetic estimate, on a mean crossing time of 37 s.
-Chronological split (4,746 train / 1,187 test).
+| Test set | `length / entry_speed` | Model |
+|----------|------------------------|-------|
+| San Diego 1k (own split) | 4.37 s | **0.69 s** |
+| La Mesa (different city) | 3.26 s | **0.36 s** |
+| San Diego 100 (held out) | 3.72 s | **0.29 s** |
 
 ### Future Traffic Model
 
@@ -649,16 +675,32 @@ Chronological split (4,746 train / 1,187 test).
 - **Input**: avg/max/min/std speed, vehicle_count, observation_count, vehicle_type_diversity, segment_length
 - **Output**: predicted speed, thresholded into HIGH/MEDIUM/LOW
 
-| Method | Future speed MAE | Congestion class | Macro F1 |
-|--------|------------------|------------------|----------|
-| Always guess MEDIUM | - | 77.5% | 0.291 |
-| Persistence (same as now) | 1.658 m/s | 73.7% | 0.516 |
-| **This model** | **1.278 m/s** | **83.3%** | **0.593** |
+| Test set | Persistence | Model | Class acc (majority) | Macro F1 |
+|----------|-------------|-------|----------------------|----------|
+| San Diego 1k (own split) | 1.544 m/s | **1.113** | 88.0% (85.3%) | 0.629 |
+| La Mesa (different city) | 1.760 m/s | **1.055** | 88.3% (83.9%) | 0.666 |
+| San Diego 100 (held out) | 1.418 m/s | **0.664** | 89.8% (73.9%) | 0.724 |
 
-Predicting the class *directly* does not work here: 74% of windows are MEDIUM,
-so a classifier learns to say MEDIUM and scored 74.7% - below the 77.5%
-always-guess baseline. Regressing the speed and thresholding afterwards uses
-the full signal and beats every baseline on both accuracy and macro F1.
+Predicting the class *directly* does not work here: 85% of windows are MEDIUM,
+so a classifier learns to say MEDIUM and lands below the always-guess baseline.
+Regressing the speed and thresholding afterwards uses the full signal and beats
+persistence and majority on every set.
+
+Both models score better on the held-out sets than on their own test split.
+That is not evidence of unusual generalisation - those datasets simply contain
+shorter, simpler crossings (La Mesa averages 20.6 s against 34.5 s in training).
+
+### Where these models do not work
+
+On `fcd_history1.h5` the future-traffic model is **worse than doing nothing**
+(4.17 m/s against persistence at 0.90 m/s). The cause is a distribution
+mismatch, not a bug: that dataset reaches 33.3 m/s while San Diego never
+exceeds 15.0, so 17% of its observations sit outside anything the model was
+trained on, and a random forest cannot extrapolate past its training range.
+
+The honest scope is therefore: **generalises to an unseen road network with
+comparable speed limits; does not transfer to a different road class.** Using
+it on motorway-speed data would need training data that includes those speeds.
 
 ### Current congestion is not a model
 

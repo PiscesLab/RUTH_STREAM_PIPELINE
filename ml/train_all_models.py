@@ -24,7 +24,15 @@ from train_travel_time_model import train_travel_time_model
 
 
 def main():
-    h5_file = sys.argv[1] if len(sys.argv) > 1 else "../inputfiles/SanDiegoFCD100.h5"
+    """Usage: train_all_models.py <train.h5> [holdout.h5 ...]
+
+    Files after the first are evaluated but never trained on. Prefer a
+    different road network as a holdout (lamesa_FCD.h5 is a separate city):
+    scoring only within the simulation run you trained on overstates how far
+    the models travel.
+    """
+    h5_file = sys.argv[1] if len(sys.argv) > 1 else "../inputfiles/SanDiegoFCD1k.h5"
+    holdouts = sys.argv[2:]
 
     if not os.path.exists(h5_file):
         print(f"❌ Error: H5 file not found at {h5_file}")
@@ -33,17 +41,20 @@ def main():
     print("=" * 60)
     print("🚦 Training ML Models for RUTH Traffic Pipeline")
     print("=" * 60)
+    print(f"Training on: {os.path.basename(h5_file)}")
+    if holdouts:
+        print("Held out   : " + ", ".join(os.path.basename(h) for h in holdouts))
     print()
 
     try:
         print("Step 1/2: Travel Time (actual crossing duration)...")
         print("-" * 60)
-        train_travel_time_model(h5_file)
+        train_travel_time_model(h5_file, holdout_paths=holdouts)
         print()
 
         print("Step 2/2: Future Traffic (speed 5 minutes ahead)...")
         print("-" * 60)
-        train_future_congestion_model(h5_file)
+        train_future_congestion_model(h5_file, holdout_paths=holdouts)
         print()
 
         print("=" * 60)
