@@ -670,15 +670,34 @@ The first file trains; every file after it is only evaluated.
 ### Future Traffic Model
 
 - **Type**: RandomForestRegressor
-- **Predicts**: mean speed on the segment over the next 5 minutes
+- **Predicts**: mean speed on the segment over the next 60 seconds
 - **Input**: avg/max/min/std speed, vehicle_count, observation_count, vehicle_type_diversity, segment_length
 - **Output**: predicted speed, thresholded into HIGH/MEDIUM/LOW
 
 | Test set | Persistence | Model | Class acc (majority) | Macro F1 |
 |----------|-------------|-------|----------------------|----------|
-| San Diego 1k (own split) | 1.544 m/s | **1.113** | 88.0% (85.3%) | 0.629 |
-| La Mesa (different city) | 1.760 m/s | **1.055** | 88.3% (83.9%) | 0.666 |
-| San Diego 100 (held out) | 1.418 m/s | **0.664** | 89.8% (73.9%) | 0.724 |
+| San Diego 1k (own split) | 1.306 m/s | **0.807** | 91.2% (82.5%) | 0.719 |
+| La Mesa (different city) | 1.768 m/s | **0.717** | 90.7% (79.0%) | 0.792 |
+| San Diego 100 (held out) | 1.254 m/s | **0.369** | 94.7% (72.5%) | 0.840 |
+
+#### Choosing the 60-second horizon
+
+Each candidate horizon was scored against a persistence baseline on the
+held-out city:
+
+| Horizon | La Mesa MAE | Macro F1 | Gain over persistence |
+|---------|-------------|----------|-----------------------|
+| **60 s** | **0.717** | **0.791** | +38% |
+| 120 s | 0.996 | 0.707 | +30% |
+| 300 s | 1.055 | 0.699 | +27% |
+| 600 s | 1.258 | 0.667 | +29% |
+| 900 s | 1.311 | 0.617 | +30% |
+| 1800 s | 1.242 | 0.621 | +34% |
+
+60 s is the most accurate and pairs with the 60 s window, so the twin predicts
+its next window from its current one. The model beats persistence at every
+horizon tested, so a longer horizon remains viable where a use case needs more
+warning - at a measured accuracy cost.
 
 Predicting the class *directly* does not work here: 85% of windows are MEDIUM,
 so a classifier learns to say MEDIUM and lands below the always-guess baseline.

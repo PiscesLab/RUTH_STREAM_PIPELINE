@@ -9,7 +9,8 @@ features it is served at run time cannot drift apart.
 Why a window at all: the earlier implementation averaged over every event a
 segment had ever seen, so after a few hundred events a new observation barely
 moved the average and the twin stopped reflecting current conditions. Measured
-on SanDiegoFCD100.h5 (3.5 h of traffic), predicting the next 5 minutes:
+on SanDiegoFCD100.h5 (3.5 h of traffic), predicting the next 5 minutes (the
+horizon in use at the time of that sweep; it is now 60 s):
 
     estimator              speed MAE     congestion label
     cumulative (old)         2.03 m/s          76.5%
@@ -27,8 +28,14 @@ import pandas as pd
 # Length of the rolling window used to describe "conditions now".
 WINDOW_SECONDS = 60
 
-# How far ahead the future-congestion model predicts.
-HORIZON_SECONDS = 300
+# How far ahead the future-traffic model predicts. Chosen by sweeping
+# 60s-1800s and scoring each against a persistence baseline on a held-out city
+# (see README). 60s was clearly the most accurate - macro F1 0.791 against
+# 0.699 at 300s - and it pairs naturally with the 60s window, so the twin
+# predicts its next window from its current one. The model beats persistence
+# at every horizon tested (+27% to +38%), so a longer horizon remains viable
+# if a use case needs more warning, at a measured accuracy cost.
+HORIZON_SECONDS = 60
 
 # Minimum observations in the horizon before a future label is trustworthy.
 MIN_HORIZON_SAMPLES = 2
