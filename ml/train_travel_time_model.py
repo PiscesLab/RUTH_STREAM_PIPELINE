@@ -25,9 +25,13 @@ from features import (  # noqa: E402
     load_fcd_df,
 )
 
+# max_leaf_nodes caps how large each tree can grow, so model size stays bounded
+# no matter how much data is added. Unbounded trees reached 455MB on 264k rows
+# and scored *worse* on held-out data (macro F1 0.666/0.728 against 0.699/0.751
+# here) - they were memorising rather than generalising.
 MODEL_PARAMS = dict(
     n_estimators=100,
-    max_depth=20,
+    max_leaf_nodes=20000,
     min_samples_split=5,
     min_samples_leaf=2,
     random_state=42,

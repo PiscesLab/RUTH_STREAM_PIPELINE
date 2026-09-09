@@ -39,8 +39,7 @@ RUTH_STREAM_PIPELINE/
 │   ├── train_future_congestion_model.py # Train future-traffic regressor
 │   └── train_all_models.py              # Master training script
 ├── producer/
-│   ├── stream_to_kafka.py               # Producer: sends FCD data to Kafka
-│   └── fcd_stream_gen.py                # FCD data generator
+│   └── stream_to_kafka.py               # Producer: sends FCD data to Kafka
 ├── statefun_app/
 │   ├── functions.py                     # StateFun functions for stream processing
 │   ├── ml_functions.py                  # ML model loading and predictions
