@@ -1,0 +1,136 @@
+{
+  "10k": {
+    "runs": [
+      "10kS3-control",
+      "10kS3-incidents"
+    ],
+    "horizons": {
+      "5m": {
+        "all roads": {
+          "rows": 273996,
+          "speed_mae": {
+            "model": 1.538,
+            "persistence": 1.988,
+            "usual speed": 1.664,
+            "profile": 1.805
+          },
+          "travel_time_mae_s": {
+            "model": 4.19,
+            "persistence": 5.3,
+            "usual speed": 4.91,
+            "profile": 5.12
+          }
+        },
+        "incident-affected": {
+          "rows": 1321,
+          "speed_mae": {
+            "model": 1.856,
+            "persistence": 2.059,
+            "usual speed": 5.44,
+            "profile": 5.336
+          },
+          "travel_time_mae_s": {
+            "model": 41.01,
+            "persistence": 44.91,
+            "usual speed": 128.71,
+            "profile": 128.63
+          }
+        },
+        "congestion_HIGH": {
+          "actual_high_rows": 596,
+          "model_p_r_f1": [
+            0.891,
+            0.797,
+            0.841
+          ],
+          "persistence_p_r_f1": [
+            0.812,
+            0.805,
+            0.809
+          ],
+          "profile_p_r_f1": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "early_warning": {
+          "onsets": 30,
+          "onsets_with_road_seen_h_min_before": 11,
+          "warned_by_model_pct": 0.0,
+          "warned_by_persistence_pct": 0.0
+        }
+      },
+      "15m": {
+        "all roads": {
+          "rows": 221477,
+          "speed_mae": {
+            "model": 1.639,
+            "persistence": 2.198,
+            "usual speed": 1.717,
+            "profile": 1.844
+          },
+          "travel_time_mae_s": {
+            "model": 4.99,
+            "persistence": 6.63,
+            "usual speed": 5.29,
+            "profile": 5.49
+          }
+        },
+        "incident-affected": {
+          "rows": 1116,
+          "speed_mae": {
+            "model": 3.166,
+            "persistence": 3.511,
+            "usual speed": 4.548,
+            "profile": 4.558
+          },
+          "travel_time_mae_s": {
+            "model": 83.58,
+            "persistence": 94.31,
+            "usual speed": 106.53,
+            "profile": 106.87
+          }
+        },
+        "congestion_HIGH": {
+          "actual_high_rows": 513,
+          "model_p_r_f1": [
+            0.688,
+            0.515,
+            0.589
+          ],
+          "persistence_p_r_f1": [
+            0.583,
+            0.554,
+            0.568
+          ],
+          "profile_p_r_f1": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "early_warning": {
+          "onsets": 30,
+          "onsets_with_road_seen_h_min_before": 11,
+          "warned_by_model_pct": 0.0,
+          "warned_by_persistence_pct": 0.0
+        }
+      }
+    },
+    "incident_detection": {
+      "reactive": {
+        "closures": 20,
+        "detected": 19,
+        "median_delay_min": 2.0,
+        "false_alarm_road_minutes_per_hour": 4.4
+      },
+      "predictive": {
+        "closures": 20,
+        "detected": 19,
+        "median_delay_min": 2.0,
+        "false_alarm_road_minutes_per_hour": 4.4
+      }
+    }
+  }
+}

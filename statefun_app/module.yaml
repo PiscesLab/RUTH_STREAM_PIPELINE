@@ -15,3 +15,10 @@ spec:
       valueType: io.statefun.types/string
       targets:
         - com.ruth/vehicle
+---
+kind: io.statefun.kafka.v1/egress
+spec:
+  id: com.ruth/twin-updates
+  address: 172.17.0.1:9092
+  deliverySemantic:
+    type: at-least-once

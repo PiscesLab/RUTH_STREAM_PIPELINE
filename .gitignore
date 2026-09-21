@@ -39,3 +39,8 @@ Thumbs.db
 # Project specific
 inputfiles/
 *.h5
+
+# ML feature cache (rebuilt from FCD)
+ml/cache/
+ml/models/*.csv
+ml/models/model_card.json
