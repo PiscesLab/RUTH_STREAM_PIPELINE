@@ -3,28 +3,32 @@ from statefun import *
 import json
 import os
 import time
-from ml_functions import get_ml_predictions
+from predictor import Predictor, congestion, travel_time_s
+from segment_minutes import STOPPED_BELOW_MPS  # importable once predictor has added ml/ to the path
 
 functions = StatefulFunctions()
 
-# Which of the three processing modes this instance runs as:
-#   stateless  - parse and route each event, no per-segment state, no ML
-#   stateful   - track per-segment state, compute rule-based stats, no ML
-#   predictive - track state and run all ML models (the original behavior)
+# Which of the three processing modes this instance runs as. Each adds one
+# layer, so the difference between two modes is the cost of that layer:
+#   stateless  - each event judged alone: congestion and travel time from that
+#                vehicle's speed, one output per event, no memory
+#   stateful   - each road segment is a twin that keeps per-minute summaries of
+#                its last HISTORY_MINUTES; once per minute it publishes its
+#                state: congestion, travel time, incident alert
+#   predictive - stateful, plus 5- and 15-minute forecasts of speed,
+#                congestion and travel time from the trained models
 MODE = os.environ.get("PIPELINE_MODE", "predictive").lower()
 if MODE not in ("stateless", "stateful", "predictive"):
     MODE = "predictive"
 
-# A segment is described by the traffic seen in the last WINDOW_SECONDS of
-# simulated time, so the twin reflects current conditions rather than an
-# average over everything it has ever seen. Must stay in step with
-# WINDOW_SECONDS in ml/features.py, which the models are trained against.
-WINDOW_SECONDS = int(os.environ.get("WINDOW_SECONDS", "60"))
+# Minutes of per-minute summaries a twin keeps: the longest model feature
+# window (ml/features.py WINDOWS_MIN).
+HISTORY_MINUTES = 15
 
-# Safety bound on stored observations per segment. The busiest segment in
-# SanDiegoFCD100.h5 sees 36 events in a 60s window, so this is far above what
-# the data produces; it only guards against a pathological input.
-MAX_WINDOW_EVENTS = 500
+# Kafka topic the twins publish to (egress com.ruth/twin-updates in module.yaml).
+OUTPUT_TOPIC = os.environ.get("OUTPUT_TOPIC", "twin_updates")
+
+predictor = Predictor()
 
 # Per-event console logging is off by default: printing a line per event is
 # slow enough to dominate the measurement we are trying to take. Set QUIET=0
@@ -185,6 +189,7 @@ async def vehicle_fn(ctx: Context, message: Message):
         "vehicle_id": event["vehicle"]["id"],
         "segment_length_m": segment_length,
         "vehicle_type": vehicle_type,
+        "sent_at_ms": event.get("sent_at_ms"),
     }
 
     ctx.send(
@@ -196,168 +201,79 @@ async def vehicle_fn(ctx: Context, message: Message):
     )
 
 
-def _summarise(speeds, vehicle_types, vehicle_ids):
-    """Describe a window of observations.
+def _publish(ctx, segment_id, payload):
+    ctx.send_egress(kafka_egress_message(
+        typename="com.ruth/twin-updates", topic=OUTPUT_TOPIC,
+        key=segment_id, value=json.dumps(payload)))
 
-    Mirrors summarise_window() in ml/features.py, which produced the features
-    the models were trained on - including the population standard deviation
-    (ddof=0), and the distinction between distinct vehicles and raw samples.
-    The two must agree or the models see inputs at serving time that are
-    shaped differently from their training data.
-    """
-    n = len(speeds)
-    avg = sum(speeds) / n
-    mean_sq = sum(s * s for s in speeds) / n
-    variance = max(0.0, mean_sq - avg * avg)
-    return {
-        "avg_speed": avg,
-        "max_speed": max(speeds),
-        "min_speed": min(speeds),
-        "std_speed": variance ** 0.5,
-        "vehicle_count": len(set(vehicle_ids)),
-        "observation_count": n,
-        "vehicle_type_diversity": len(set(vehicle_types)),
-    }
+
+def _close_minute(current):
+    """Summary of one finished minute: (minute, mean, min, samples, vehicles, stopped share)."""
+    minute, speed_sum, samples, min_speed, stopped, vehicles = current
+    return [minute, speed_sum / samples, min_speed, samples, len(vehicles), stopped / samples]
 
 
 @functions.bind(
     typename="com.ruth/segment",
     specs=[
-        # observations in the current window, JSON: [[ts, speed, type, vehicle_id], ...]
-        ValueSpec(name="window", type=StringType),
-        ValueSpec(name="segment_length_m", type=DoubleType),
+        # the minute being filled: [minute, speed_sum, samples, min_speed, stopped, [vehicle ids]]
+        ValueSpec(name="current", type=StringType),
+        # finished minutes, oldest first, at most HISTORY_MINUTES old: [[minute, mean, min, samples, vehicles, stopped_share], ...]
+        ValueSpec(name="history", type=StringType),
     ],
 )
 async def segment_fn(ctx: Context, message: Message):
-    raw = message.as_string()
-    data = json.loads(raw)
-
+    data = json.loads(message.as_string())
+    segment_id = data["segment_id"]
     speed = float(data["speed"])
-    segment_length_m = float(data["segment_length_m"])
-    vehicle_type = data.get("vehicle_type", "unknown")
+    segment_length = float(data["segment_length_m"])
     vehicle_id = data.get("vehicle_id")
-    # simulated time from the FCD record, not wall clock: the window has to
-    # track traffic time so it behaves the same at any replay speed
-    now = float(data["timestamp"])
+    # simulated time from the FCD record, so minutes follow traffic time at any replay speed
+    minute = int(data["timestamp"]) // 60
 
     if MODE == "stateless":
-        # No per-segment memory: this event is judged entirely on its own,
-        # nothing is read from or written to ctx.storage.
-        window = [[now, speed, vehicle_type, vehicle_id]]
-    else:
-        stored = json.loads(ctx.storage.window or "[]")
-        # Entries written by an older build carry fewer fields. Keep only
-        # well-formed ones so a deploy over live state heals itself within one
-        # window rather than failing on every event for that segment.
-        window = [e for e in stored if isinstance(e, list) and len(e) == 4]
-        window.append([now, speed, vehicle_type, vehicle_id])
+        ratio = speed / predictor.usual_speed(segment_id)
+        _publish(ctx, segment_id, {
+            "mode": MODE, "segment_id": segment_id, "timestamp": data["timestamp"],
+            "speed_mps": round(speed, 2), "congestion": congestion(ratio),
+            "travel_time_s": round(travel_time_s(segment_length, speed), 1),
+            "sent_at_ms": data.get("sent_at_ms"),
+        })
+        return
 
-        # drop observations that have aged out of the window
-        cutoff = now - WINDOW_SECONDS
-        window = [e for e in window if e[0] > cutoff]
-        if len(window) > MAX_WINDOW_EVENTS:
-            window = window[-MAX_WINDOW_EVENTS:]
+    current = json.loads(ctx.storage.current) if ctx.storage.current else None
 
-        ctx.storage.window = json.dumps(window)
-        ctx.storage.segment_length_m = segment_length_m
+    if current is not None and minute > current[0]:
+        # the twin's previous minute is complete: record it and publish the twin's state
+        history = json.loads(ctx.storage.history) if ctx.storage.history else []
+        closed = _close_minute(current)
+        history = [h for h in history if h[0] > closed[0] - HISTORY_MINUTES] + [closed]
+        ctx.storage.history = json.dumps(history)
 
-    stats = _summarise(
-        [e[1] for e in window], [e[2] for e in window], [e[3] for e in window]
-    )
-    avg_speed = stats["avg_speed"]
-    max_speed = stats["max_speed"]
-    min_speed = stats["min_speed"]
-    std_speed = stats["std_speed"]
-    count = stats["vehicle_count"]
-    observation_count = stats["observation_count"]
-    vehicle_type_diversity = stats["vehicle_type_diversity"]
-    vehicle_types_str = ",".join(sorted({e[2] for e in window}))
+        update = {
+            "mode": MODE, "segment_id": segment_id, "minute": closed[0],
+            "vehicles": closed[4], "samples": closed[3], "mean_speed_mps": round(closed[1], 2),
+            **predictor.current(segment_id, segment_length, closed[1], closed[5]),
+        }
+        if MODE == "predictive":
+            update["forecast"] = predictor.forecast(segment_id, segment_length, history)
+        update["sent_at_ms"] = data.get("sent_at_ms")
+        _publish(ctx, segment_id, update)
+        log(f"[{MODE}] {segment_id} minute={closed[0]} speed={closed[1]:.1f} "
+            f"congestion={update['congestion']} forecast={update.get('forecast')}")
+        current = None
+    elif current is not None and minute < current[0]:
+        return  # late sample for a minute already closed; the producer sends in time order
 
-    if avg_speed < 5:
-        congestion = "HIGH"
-    elif avg_speed < 12:
-        congestion = "MEDIUM"
-    else:
-        congestion = "LOW"
-
-    log(
-        f"[{MODE}] segment={data['segment_id']} "
-        f"vehicles={count} samples={observation_count} "
-        f"avg_speed={avg_speed:.2f} congestion={congestion} "
-        f"vehicle_types={vehicle_types_str}"
-    )
-
-    # ML inference only runs in predictive mode. Current congestion is not a
-    # model - it is the threshold applied just above.
-    if MODE == "predictive":
-        ml_preds = get_ml_predictions(
-            data['segment_id'],
-            segment_length_m,
-            count,
-            observation_count,
-            avg_speed,
-            max_speed,
-            min_speed,
-            std_speed,
-            entry_speed=speed,
-            is_truck=1 if vehicle_type == "truck" else 0,
-            vehicle_type_diversity=vehicle_type_diversity,
-        )
-        if ml_preds:
-            if 'predicted_travel_time' in ml_preds:
-                log(f"[TRAVEL TIME PREDICTION] segment={data['segment_id']} "
-                    f"vehicle will take {ml_preds['predicted_travel_time']}s to cross")
-            if 'predicted_next_congestion' in ml_preds:
-                log(f"[FUTURE TRAFFIC] segment={data['segment_id']} "
-                    f"in 5min: speed={ml_preds['predicted_future_speed']}m/s "
-                    f"congestion={ml_preds['predicted_next_congestion']}")
-
-    # Only what travel_time_fn reads. It used to carry the full window
-    # statistics for inference, but the models moved into segment_fn (where the
-    # arriving vehicle's own speed and type are available), leaving eight fields
-    # that were serialised on every event and never read.
-    travel_msg = {
-        "segment_id": data["segment_id"],
-        "avg_speed_mps": avg_speed,
-        "segment_length_m": segment_length_m,
-    }
-
-    ctx.send(
-        message_builder(
-            target_typename="com.ruth/travel_time",
-            target_id=data["segment_id"],
-            str_value=json.dumps(travel_msg),
-        )
-    )
-
-
-@functions.bind(
-    typename="com.ruth/travel_time",
-    specs=[],
-)
-async def travel_time_fn(ctx: Context, message: Message):
-    raw = message.as_string()
-    data = json.loads(raw)
-
-    avg_speed = float(data["avg_speed_mps"])
-    segment_length = float(data["segment_length_m"])
-
-    if avg_speed > 0:
-        travel_time_seconds = segment_length / avg_speed
-    else:
-        travel_time_seconds = 0.0
-
-    # The arithmetic estimate: what travel time looks like if you assume the
-    # segment's current average speed holds all the way across. The travel-time
-    # model in segment_fn predicts the measured crossing time instead, and
-    # beats this estimate by ~67% (3.6s -> 1.2s MAE) because vehicles do not
-    # hold one speed across a whole segment. Kept as the reference baseline.
-    log(
-        f"[TRAVEL TIME estimate] segment={data['segment_id']} "
-        f"length={segment_length:.2f}m "
-        f"avg_speed={avg_speed:.2f}m/s "
-        f"time={travel_time_seconds:.2f}s"
-    )
+    if current is None:
+        current = [minute, 0.0, 0, speed, 0, []]
+    current[1] += speed
+    current[2] += 1
+    current[3] = min(current[3], speed)
+    current[4] += speed < STOPPED_BELOW_MPS
+    if vehicle_id not in current[5]:
+        current[5].append(vehicle_id)
+    ctx.storage.current = json.dumps(current)
 
 
 handler = RequestReplyHandler(functions)
