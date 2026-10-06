@@ -1,5 +1,6 @@
 from aiohttp import web
 from statefun import *
+import asyncio
 import json
 import os
 import time
@@ -46,6 +47,11 @@ def log(message):
 _metrics = {
     "count": 0,
     "latencies_ms": [],
+    # latency of only those events that closed a minute, so the cost of the
+    # per-minute work (features + models + publish) is visible on its own
+    "publish_latencies_ms": [],
+    # latency histogram, mergeable across serving processes
+    "histogram": {},
     "start_time": None,
     "last_time": None,
     "cpu_at_reset_s": None,
@@ -56,6 +62,49 @@ _metrics = {
 }
 
 _CLOCK_TICKS = os.sysconf("SC_CLK_TCK")
+
+# Where each serving process drops its own counters, so a run with several
+# processes can be added up afterwards (one HTTP read would only reach one of
+# them). Latencies are kept as a histogram as well as a list: percentiles from
+# separate processes cannot be averaged, but their histograms can be merged.
+METRICS_DIR = os.environ.get("METRICS_DIR", "/tmp/statefun_metrics")
+_HIST_EDGES = ([1, 2, 5, 10, 20, 50, 100, 200, 500]                 # ms
+               + [1000, 2000, 5000, 10000, 20000, 50000])
+
+
+def _bucket(ms):
+    for edge in _HIST_EDGES:
+        if ms <= edge:
+            return edge
+    return "more"
+
+
+def _write_metrics_file():
+    try:
+        os.makedirs(METRICS_DIR, exist_ok=True)
+        summary = _metrics_summary()
+        summary["pid"] = os.getpid()
+        summary["histogram_ms"] = {str(k): v for k, v in _metrics["histogram"].items()}
+        summary["start_epoch"] = _metrics["start_time"]
+        summary["last_epoch"] = _metrics["last_time"]
+        path = os.path.join(METRICS_DIR, f"{os.getpid()}.json")
+        with open(path + ".tmp", "w") as f:
+            json.dump(summary, f)
+        os.replace(path + ".tmp", path)
+    except OSError:
+        pass
+
+
+def _start_metrics_writer(interval_s=1.0):
+    async def loop():
+        while True:
+            await asyncio.sleep(interval_s)
+            _write_metrics_file()
+
+    async def on_start(_app):
+        _app["metrics_writer"] = asyncio.create_task(loop())
+
+    app.on_startup.append(on_start)
 
 
 def _cpu_time_s():
@@ -91,6 +140,14 @@ _HEARTBEAT_EVERY = 250
 
 
 def _record_metrics(event):
+    """Count an event as it enters the pipeline. Latency is taken later.
+
+    Arrival is what throughput counts, but it says nothing about the work the
+    event causes: the state update, and on a minute boundary the features and
+    the models. Latency is therefore recorded by _record_latency() once the
+    segment twin has finished with the event - otherwise the measurement would
+    be blind to exactly what RQ3 sets out to price.
+    """
     now = time.time()
 
     if _metrics["start_time"] is None:
@@ -100,16 +157,30 @@ def _record_metrics(event):
     _metrics["count"] += 1
     _metrics["last_time"] = now
 
-    sent_at_ms = event.get("sent_at_ms")
-    if sent_at_ms is not None:
-        _metrics["latencies_ms"].append((now * 1000) - sent_at_ms)
-
     segment_id = event.get("road", {}).get("segment_id")
     if segment_id is not None:
         _metrics["segments_seen"].add(segment_id)
 
     if _metrics["count"] % _HEARTBEAT_EVERY == 0:
         print(f"  ... processed {_metrics['count']} events (mode={MODE})")
+
+
+def _record_latency(sent_at_ms, published):
+    """End-to-end latency: producer send -> this twin finished with the event.
+
+    `published` marks the events that closed a minute, so the cost of a
+    minute boundary (features, two model calls, the Kafka write) can be read
+    separately from the cost of an ordinary state update.
+    """
+    if sent_at_ms is None:
+        return
+    elapsed = (time.time() * 1000) - sent_at_ms
+    _metrics["latencies_ms"].append(elapsed)
+    bucket = _bucket(elapsed)
+    _metrics["histogram"][bucket] = _metrics["histogram"].get(bucket, 0) + 1
+    if published:
+        _metrics["publish_latencies_ms"].append(elapsed)
+    _metrics["last_time"] = time.time()
 
 
 def _percentile(sorted_values, pct):
@@ -128,6 +199,7 @@ def _metrics_summary():
     # the app started (which would include idle time waiting for events)
     elapsed = max(_metrics["last_time"] - _metrics["start_time"], 1e-9)
     latencies = sorted(_metrics["latencies_ms"])
+    publish_lat = sorted(_metrics["publish_latencies_ms"])
 
     # CPU burned since the last reset. Idle time costs ~no CPU, so dividing by
     # the event-processing span gives CPU use while actually working. This can
@@ -153,6 +225,13 @@ def _metrics_summary():
             "p50": round(_percentile(latencies, 50), 2) if latencies else None,
             "p95": round(_percentile(latencies, 95), 2) if latencies else None,
             "p99": round(_percentile(latencies, 99), 2) if latencies else None,
+        },
+        # latency of the subset of events that closed a minute, where the
+        # features, both models and the Kafka write happen
+        "minute_close_latency_ms": {
+            "count": len(publish_lat),
+            "p50": round(_percentile(publish_lat, 50), 2) if publish_lat else None,
+            "p95": round(_percentile(publish_lat, 95), 2) if publish_lat else None,
         },
         "cpu": {"used_s": cpu_used_s, "pct_while_working": cpu_pct},
         "memory_mb": {
@@ -239,11 +318,14 @@ async def segment_fn(ctx: Context, message: Message):
             "travel_time_s": round(travel_time_s(segment_length, speed), 1),
             "sent_at_ms": data.get("sent_at_ms"),
         })
+        _record_latency(data.get("sent_at_ms"), True)
         return
 
     current = json.loads(ctx.storage.current) if ctx.storage.current else None
+    closed_a_minute = False
 
     if current is not None and minute > current[0]:
+        closed_a_minute = True
         # the twin's previous minute is complete: record it and publish the twin's state
         history = json.loads(ctx.storage.history) if ctx.storage.history else []
         closed = _close_minute(current)
@@ -253,6 +335,16 @@ async def segment_fn(ctx: Context, message: Message):
         update = {
             "mode": MODE, "segment_id": segment_id, "minute": closed[0],
             "vehicles": closed[4], "samples": closed[3], "mean_speed_mps": round(closed[1], 2),
+            # how many finished minutes this twin is holding. After a worker
+            # failure this is 1 if the state was lost and higher if it was
+            # restored, so it is the evidence for the recovery experiment.
+            "history_minutes": len(history),
+            # the oldest minute this twin still holds. After a failure, a twin
+            # whose history reaches back before the failure kept its state; one
+            # that starts at the current minute lost it. The count alone cannot
+            # tell these apart, because a quiet road legitimately holds one
+            # minute.
+            "history_from": history[0][0],
             **predictor.current(segment_id, segment_length, closed[1], closed[5]),
         }
         if MODE == "predictive":
@@ -263,6 +355,7 @@ async def segment_fn(ctx: Context, message: Message):
             f"congestion={update['congestion']} forecast={update.get('forecast')}")
         current = None
     elif current is not None and minute < current[0]:
+        _record_latency(data.get("sent_at_ms"), False)
         return  # late sample for a minute already closed; the producer sends in time order
 
     if current is None:
@@ -274,6 +367,9 @@ async def segment_fn(ctx: Context, message: Message):
     if vehicle_id not in current[5]:
         current[5].append(vehicle_id)
     ctx.storage.current = json.dumps(current)
+
+    # the twin is done with this event: stop the clock here, not on arrival
+    _record_latency(data.get("sent_at_ms"), closed_a_minute)
 
 
 handler = RequestReplyHandler(functions)
@@ -325,6 +421,8 @@ async def metrics_reset_handler(request):
     """Zero the counters so the next run measures cleanly."""
     _metrics["count"] = 0
     _metrics["latencies_ms"] = []
+    _metrics["publish_latencies_ms"] = []
+    _metrics["histogram"] = {}
     _metrics["start_time"] = None
     _metrics["last_time"] = None
     _metrics["cpu_at_reset_s"] = _cpu_time_s()
@@ -341,8 +439,30 @@ app.add_routes([
 ])
 
 
+def serve():
+    """Serve the remote functions, on APP_WORKERS processes.
+
+    One process is one core, and the round trip per event (unpack the state,
+    run the twin, pack it back) is CPU work, so a single process is the
+    pipeline's first bottleneck. Several processes share port 8000 through
+    SO_REUSEPORT and the kernel spreads connections between them; Flink still
+    sees one endpoint, so module.yaml does not change.
+
+    Each process writes its own metrics into METRICS_DIR, because an HTTP read
+    would reach whichever process the kernel picked and report a fraction of
+    the run. benchmarks/read_metrics.py adds the files up.
+    """
+    workers = int(os.environ.get("APP_WORKERS", "1"))
+    print(f"Starting RUTH pipeline in mode={MODE} (quiet={QUIET}, workers={workers})")
+    print(f"Metrics: curl localhost:8000/metrics   |   files in {METRICS_DIR}")
+
+    if workers > 1:
+        for _ in range(workers - 1):
+            if os.fork() == 0:
+                break
+    _start_metrics_writer()
+    web.run_app(app, port=8000, reuse_port=workers > 1, print=None)
+
+
 if __name__ == "__main__":
-    print(f"Starting RUTH pipeline in mode={MODE} (quiet={QUIET})")
-    print("Read metrics any time:  curl localhost:8000/metrics")
-    print("Reset before a run:     curl localhost:8000/metrics/reset")
-    web.run_app(app, port=8000)
+    serve()

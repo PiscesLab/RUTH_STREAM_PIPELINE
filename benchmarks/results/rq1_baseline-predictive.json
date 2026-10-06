@@ -1,0 +1,30 @@
+[
+  {
+    "mode": "baseline-predictive",
+    "events": 59972,
+    "active_twins": 3600,
+    "published": 3121,
+    "elapsed_s": 11.951,
+    "throughput_eps": 5018.2,
+    "latency_ms": {
+      "p50": 15.69970703125,
+      "p95": 128.250244140625,
+      "p99": 166.951171875
+    },
+    "minute_close_latency_ms": {
+      "count": 3121,
+      "p50": 27.135009765625,
+      "p95": 146.972412109375
+    },
+    "cpu": {
+      "used_s": 9.68,
+      "pct_while_working": 81.0
+    },
+    "memory_mb": {
+      "current": 168.0,
+      "peak": 168.0
+    },
+    "system": "baseline-predictive",
+    "offered_rate": 5000
+  }
+]

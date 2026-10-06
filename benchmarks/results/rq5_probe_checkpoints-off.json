@@ -1,0 +1,10 @@
+{
+  "label": "checkpoints-off",
+  "killed": "statefun-worker1",
+  "segment": "49103387_49103382",
+  "updates_before_failure": 5,
+  "history_minutes_before_failure": 5,
+  "updates_after_failure": 6,
+  "history_minutes_after_failure": 6,
+  "state_survived": true
+}

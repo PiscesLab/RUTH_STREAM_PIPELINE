@@ -1,0 +1,49 @@
+{
+  "what": "the four execution models on the same workload, 2000 events/s offered",
+  "fixed": {
+    "offered_rate_eps": 2000,
+    "seconds": 30,
+    "twins": 3600,
+    "mode": "predictive",
+    "data": "1k_seed3 control, cycled by the load generator",
+    "models": "ml/models/speed_forecast_{5m,15m}.pkl, identical in every system"
+  },
+  "equivalence_check": "all four published 3684-3685 updates, so they did the same work",
+  "systems": {
+    "statefun": {
+      "serving_processes": 8,
+      "processed_eps": 2012.5,
+      "latency_p50_ms_upper_bound": 50,
+      "memory_mb": 949,
+      "published": 3684,
+      "notes": "state shipped with each invocation; checkpointing on",
+      "source": "ckpt_cost.log, 2026-10-05"
+    },
+    "ray_actors": {
+      "actors": 8,
+      "processed_eps": 1998.8,
+      "latency_p50_ms_upper_bound": 20,
+      "memory_mb": 1731.6,
+      "published": 3685,
+      "notes": "state in actor heap; no managed state, no recovery, roads sharded across actors by hash because one actor per road would need one OS process per road",
+      "source": "ray_run1.log, 2026-10-05"
+    },
+    "flink_keyed_per_minute": {
+      "parallelism": 4,
+      "processed_eps": 526.6,
+      "published": 3685,
+      "time_in_function_s": {"state_read": 6.0, "state_write": 0.1, "model": 1.0, "total": 7.4},
+      "notes": "open minute kept in the operator, Flink state touched at minute close only; loses the minute in progress on failure",
+      "source": "keyed_perminute.log, 2026-10-05"
+    },
+    "flink_keyed_per_event": {
+      "parallelism": 4,
+      "processed_eps": 206.7,
+      "published": 3684,
+      "time_in_function_s": {"state_read": 17.1, "state_write": 0.3, "model": 1.4, "total": 19.1},
+      "notes": "faithful translation: all twin state in Flink, read and written per event. 91% of the time is Python-to-JVM state access at about 1.5 ms per access",
+      "source": "keyed_perevent.log, 2026-10-05"
+    }
+  },
+  "caveat": "the keyed numbers are PyFlink's cost for Python state access, not Flink keyed state in general; a Java implementation would avoid the boundary but cannot run scikit-learn models"
+}

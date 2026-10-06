@@ -1,0 +1,114 @@
+[
+  {
+    "mode": "baseline-predictive",
+    "events": 149937,
+    "active_twins": 1000,
+    "published": 3232,
+    "elapsed_s": 30.005,
+    "throughput_eps": 4997.0,
+    "latency_ms": {
+      "p50": 10.718994140625,
+      "p95": 107.759033203125,
+      "p99": 134.005615234375
+    },
+    "minute_close_latency_ms": {
+      "count": 3232,
+      "p50": 16.836181640625,
+      "p95": 123.876220703125
+    },
+    "cpu": {
+      "used_s": 23.42,
+      "pct_while_working": 78.1
+    },
+    "memory_mb": {
+      "current": 170.6,
+      "peak": 170.6
+    },
+    "system": "baseline-predictive",
+    "twins_offered": 1000
+  },
+  {
+    "mode": "baseline-predictive",
+    "events": 149942,
+    "active_twins": 4810,
+    "published": 7867,
+    "elapsed_s": 30.001,
+    "throughput_eps": 4997.9,
+    "latency_ms": {
+      "p50": 19.447021484375,
+      "p95": 154.396240234375,
+      "p99": 224.333251953125
+    },
+    "minute_close_latency_ms": {
+      "count": 7867,
+      "p50": 34.23046875,
+      "p95": 194.439208984375
+    },
+    "cpu": {
+      "used_s": 24.91,
+      "pct_while_working": 83.0
+    },
+    "memory_mb": {
+      "current": 176.3,
+      "peak": 176.3
+    },
+    "system": "baseline-predictive",
+    "twins_offered": 5000
+  },
+  {
+    "mode": "baseline-predictive",
+    "events": 149938,
+    "active_twins": 8550,
+    "published": 9769,
+    "elapsed_s": 30.001,
+    "throughput_eps": 4997.7,
+    "latency_ms": {
+      "p50": 22.77978515625,
+      "p95": 134.90380859375,
+      "p99": 170.1865234375
+    },
+    "minute_close_latency_ms": {
+      "count": 9769,
+      "p50": 30.7666015625,
+      "p95": 143.99365234375
+    },
+    "cpu": {
+      "used_s": 25.72,
+      "pct_while_working": 85.7
+    },
+    "memory_mb": {
+      "current": 177.6,
+      "peak": 177.6
+    },
+    "system": "baseline-predictive",
+    "twins_offered": 9134
+  },
+  {
+    "mode": "baseline-predictive",
+    "events": 149939,
+    "active_twins": 12723,
+    "published": 10679,
+    "elapsed_s": 30.004,
+    "throughput_eps": 4997.3,
+    "latency_ms": {
+      "p50": 37.154541015625,
+      "p95": 158.126953125,
+      "p99": 197.034912109375
+    },
+    "minute_close_latency_ms": {
+      "count": 10679,
+      "p50": 59.075439453125,
+      "p95": 174.2197265625
+    },
+    "cpu": {
+      "used_s": 25.93,
+      "pct_while_working": 86.4
+    },
+    "memory_mb": {
+      "current": 183.0,
+      "peak": 183.0
+    },
+    "system": "baseline-predictive",
+    "twins_offered": 14211
+  }
+]
