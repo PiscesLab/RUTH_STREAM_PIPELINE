@@ -186,6 +186,133 @@ def probe(args):
     return 0
 
 
+def live_kill(args):
+    """Kill the worker while load is still flowing, and time the recovery.
+
+    The protocol above kills an idle pipeline, so nothing is in flight and there
+    is nothing to catch up: it reports the detector's own quiet window at every
+    twin population, which is no measurement at all. Recovery only has a
+    duration if events are still arriving when the worker dies, so here the
+    load runs for the whole experiment and the kill lands in the middle of it.
+
+    Two durations are reported, because they answer different questions:
+
+        resume_s   kill -> the first update published afterwards. This is the
+                   job restarting and restoring its state, so it is the part
+                   expected to grow with the amount of state held.
+        recover_s  kill -> output rate back to its pre-failure level and
+                   staying there. This includes draining whatever queued up
+                   while the job was down.
+    """
+    out_rate_window = 10            # seconds of samples defining "the rate now"
+    load_s = args.warmup_s + args.pre_kill_s + args.after_s + 30
+
+    print(f"starting {load_s}s of load at {args.rate}/s over {args.twins} twins...",
+          flush=True)
+    load = subprocess.Popen(
+        [VENV, os.path.join(REPO, "producer", "stream_to_kafka.py"),
+         "--topic", args.in_topic, "--rate", str(args.rate),
+         "--seconds", str(load_s), "--twins", str(args.twins),
+         "--procs", "4", "--source-rows", str(args.source_rows)]
+        + (["--h5", args.h5] if args.h5 else []),
+        cwd=REPO, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    # the producer pre-serialises every message before sending any, which takes
+    # a while at a million source rows; the warm-up is counted from the first
+    # update actually published rather than from here
+    print("waiting for the first update...", flush=True)
+    t_wait = time.time()
+    while offsets(args.out_topic) == 0:
+        if time.time() - t_wait > 900:
+            print("no updates were ever published")
+            load.terminate()
+            return 1
+        time.sleep(2)
+
+    print(f"warming up for {args.warmup_s}s so the twins accumulate history...",
+          flush=True)
+    time.sleep(args.warmup_s)
+
+    samples = []                    # (seconds since kill, output offset, tag)
+    print(f"sampling {args.pre_kill_s}s of steady state...", flush=True)
+    pre = []
+    t_end = time.time() + args.pre_kill_s
+    while time.time() < t_end:
+        pre.append((time.time(), offsets(args.out_topic)))
+        time.sleep(1)
+    baseline = ((pre[-1][1] - pre[0][1]) / (pre[-1][0] - pre[0][0])) if len(pre) > 1 else 0
+    print(f"pre-failure output rate: {baseline:.1f} updates/s", flush=True)
+
+    worker = busy_worker()
+    if not worker:
+        print("could not identify the worker running the job")
+        load.terminate()
+        return 1
+    before_kill = offsets(args.out_topic)
+    print(f"killing {worker}...", flush=True)
+    kill_time = time.time()
+    sh(f"sudo -n docker kill {worker}")
+
+    resume_s, recover_s, back_since, plateau = None, None, None, None
+    t_end = kill_time + args.after_s
+    while time.time() < t_end:
+        now, count = time.time() - kill_time, offsets(args.out_topic)
+        samples.append((round(now, 1), count, ""))
+        # The first sample after the kill is already higher than the count taken
+        # just before it: records the sink had produced before dying are still
+        # landing in Kafka. Treating any increase as recovery therefore reports
+        # a fraction of a second. The real outage is the plateau that follows,
+        # so the baseline for "resumed" is that first post-kill reading.
+        if plateau is None:
+            plateau = count
+        elif resume_s is None and count > plateau:
+            resume_s = round(now, 1)
+            print(f"  output resumed after {resume_s}s", flush=True)
+        # "recovered" = the recent rate is back to the pre-failure rate; a
+        # single fast sample is not enough, it has to hold
+        recent = [s for s in samples if s[0] is not None and now - s[0] <= out_rate_window]
+        if len(recent) > 1 and baseline > 0:
+            rate = (recent[-1][1] - recent[0][1]) / max(recent[-1][0] - recent[0][0], 1e-6)
+            if rate >= 0.8 * baseline:
+                back_since = back_since or now
+                if recover_s is None and now - back_since >= out_rate_window:
+                    recover_s = round(back_since, 1)
+                    print(f"  output rate back to pre-failure level at {recover_s}s",
+                          flush=True)
+            else:
+                back_since = None
+        time.sleep(1)
+
+    # the producer sends from several processes, and terminating the parent
+    # leaves those children sending into the next run's topic
+    load.terminate()
+    sh("pkill -f 'stream_to_kafka[.]py'")
+    arrived_during_outage = (round(baseline * resume_s) if resume_s else None)
+    result = {
+        "label": args.label,
+        "mode": "live-kill",
+        "killed": worker,
+        "twins_requested": args.twins,
+        "offered_rate_eps": args.rate,
+        "warmup_s": args.warmup_s,
+        "pre_failure_output_rate_per_s": round(baseline, 1),
+        "updates_before_kill": before_kill,
+        "resume_s": resume_s,
+        "recover_s": recover_s,
+        "updates_missed_while_down": arrived_during_outage,
+        "updates_at_end": samples[-1][1] if samples else None,
+        "samples_s_offset": [(s[0], s[1]) for s in samples],
+    }
+    print(json.dumps({k: v for k, v in result.items() if k != "samples_s_offset"},
+                     indent=2))
+    os.makedirs(RESULTS, exist_ok=True)
+    path = os.path.join(RESULTS, f"rq5_live_{args.label}_{args.twins}twins.json")
+    with open(path, "w") as f:
+        json.dump(result, f, indent=2)
+    print("raw:", path)
+    return 0
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--in-topic", required=True)
@@ -193,19 +320,36 @@ def main():
     p.add_argument("--rate", type=int, default=1000)
     p.add_argument("--events", type=int, default=60000)
     p.add_argument("--twins", type=int, default=3600)
+    # recovery time against state size needs the twin count actually to vary,
+    # and the reachable count is capped by the distinct vehicles seen per
+    # segment, so a high --twins needs more rows than the producer's default
+    p.add_argument("--source-rows", type=int, default=50000)
+    p.add_argument("--h5", default=None, help="defaults to the producer's own default file")
     p.add_argument("--label", required=True, help="checkpoints-on or checkpoints-off")
     p.add_argument("--probe", action="store_true",
                    help="controlled single-segment state-survival test")
+    p.add_argument("--live-kill", action="store_true",
+                   help="kill the worker while load is still flowing and time "
+                        "the recovery, which the idle protocol cannot do")
+    p.add_argument("--warmup-s", type=float, default=90,
+                   help="load time before the kill, so twins hold history")
+    p.add_argument("--pre-kill-s", type=float, default=20,
+                   help="sampling window establishing the pre-failure output rate")
+    p.add_argument("--after-s", type=float, default=180,
+                   help="how long to keep sampling after the kill")
     args = p.parse_args()
 
     if args.probe:
         return probe(args)
+    if args.live_kill:
+        return live_kill(args)
 
     print(f"sending {args.events} events at {args.rate}/s...", flush=True)
     subprocess.run([VENV, os.path.join(REPO, "producer", "stream_to_kafka.py"),
                     "--topic", args.in_topic, "--rate", str(args.rate),
                     "--events", str(args.events), "--twins", str(args.twins),
-                    "--procs", "4"],
+                    "--procs", "4", "--source-rows", str(args.source_rows)]
+                   + (["--h5", args.h5] if args.h5 else []),
                    cwd=REPO, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     print("waiting until the pipeline is caught up...", flush=True)
@@ -237,7 +381,9 @@ def main():
                     # a few minutes ahead: far enough that the twins close new
                     # minutes, close enough that minutes from before the failure
                     # are still inside the 15-minute window
-                    "--time-shift-min", "3"],
+                    "--time-shift-min", "3",
+                    "--source-rows", str(args.source_rows)]
+                   + (["--h5", args.h5] if args.h5 else []),
                    cwd=REPO, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     u3_total, _ = wait_until_quiet(args.out_topic)
 

@@ -1,30 +1,114 @@
 [
   {
     "mode": "baseline-predictive",
-    "events": 59972,
+    "events": 599814,
     "active_twins": 3600,
-    "published": 3121,
-    "elapsed_s": 11.951,
-    "throughput_eps": 5018.2,
+    "published": 3124,
+    "elapsed_s": 29.995,
+    "throughput_eps": 19997.0,
     "latency_ms": {
-      "p50": 15.69970703125,
-      "p95": 128.250244140625,
-      "p99": 166.951171875
+      "p50": 17.269775390625,
+      "p95": 1547.2900390625,
+      "p99": 2244.498779296875
     },
     "minute_close_latency_ms": {
-      "count": 3121,
-      "p50": 27.135009765625,
-      "p95": 146.972412109375
+      "count": 3124,
+      "p50": 973.511962890625,
+      "p95": 2311.04931640625
     },
     "cpu": {
-      "used_s": 9.68,
-      "pct_while_working": 81.0
+      "used_s": 25.7,
+      "pct_while_working": 85.7
     },
     "memory_mb": {
-      "current": 168.0,
-      "peak": 168.0
+      "current": 201.2,
+      "peak": 201.2
     },
     "system": "baseline-predictive",
-    "offered_rate": 5000
+    "offered_rate": 20000
+  },
+  {
+    "mode": "baseline-predictive",
+    "events": 858032,
+    "active_twins": 3600,
+    "published": 3130,
+    "elapsed_s": 29.989,
+    "throughput_eps": 28611.3,
+    "latency_ms": {
+      "p50": 57.35009765625,
+      "p95": 2357.77197265625,
+      "p99": 2684.549072265625
+    },
+    "minute_close_latency_ms": {
+      "count": 3130,
+      "p50": 1268.01611328125,
+      "p95": 2624.21533203125
+    },
+    "cpu": {
+      "used_s": 26.22,
+      "pct_while_working": 87.4
+    },
+    "memory_mb": {
+      "current": 219.1,
+      "peak": 222.1
+    },
+    "system": "baseline-predictive",
+    "offered_rate": 30000
+  },
+  {
+    "mode": "baseline-predictive",
+    "events": 855709,
+    "active_twins": 3600,
+    "published": 3177,
+    "elapsed_s": 30.002,
+    "throughput_eps": 28522.1,
+    "latency_ms": {
+      "p50": 60.79248046875,
+      "p95": 2763.366943359375,
+      "p99": 3325.265625
+    },
+    "minute_close_latency_ms": {
+      "count": 3177,
+      "p50": 1457.567138671875,
+      "p95": 3049.650146484375
+    },
+    "cpu": {
+      "used_s": 26.76,
+      "pct_while_working": 89.2
+    },
+    "memory_mb": {
+      "current": 220.6,
+      "peak": 220.6
+    },
+    "system": "baseline-predictive",
+    "offered_rate": 40000
+  },
+  {
+    "mode": "baseline-predictive",
+    "events": 868212,
+    "active_twins": 3600,
+    "published": 3171,
+    "elapsed_s": 29.974,
+    "throughput_eps": 28965.8,
+    "latency_ms": {
+      "p50": 66.559814453125,
+      "p95": 2590.404296875,
+      "p99": 3018.923828125
+    },
+    "minute_close_latency_ms": {
+      "count": 3171,
+      "p50": 1404.58984375,
+      "p95": 3038.692626953125
+    },
+    "cpu": {
+      "used_s": 26.09,
+      "pct_while_working": 87.0
+    },
+    "memory_mb": {
+      "current": 217.9,
+      "peak": 221.0
+    },
+    "system": "baseline-predictive",
+    "offered_rate": 50000
   }
 ]

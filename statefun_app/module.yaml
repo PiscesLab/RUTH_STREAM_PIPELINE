@@ -11,7 +11,7 @@ spec:
   startupPosition:
     type: earliest
   topics:
-    - topic: in_rq1_20000_predictive_1791246415
+    - topic: in_ckpt_off_2_predictive_1791957552
       valueType: io.statefun.types/string
       targets:
         - com.ruth/vehicle

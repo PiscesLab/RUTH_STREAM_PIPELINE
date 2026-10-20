@@ -66,6 +66,11 @@ def collect(directory=DEFAULT_DIR):
                                    for p in parts), 1),
         "memory_mb_total": round(sum(((p.get("memory_mb") or {}).get("current") or 0)
                                      for p in parts), 1),
+        # summed across processes, like cpu: each process times only its own
+        # work, so the totals add up the way the per-process CPU figures do
+        "timers_s": {k: round(sum((p.get("timers_s") or {}).get(k, 0.0)
+                                  for p in parts), 2)
+                     for k in ("state", "model", "total")},
         "histogram_ms": histogram,
     }
 

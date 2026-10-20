@@ -1,0 +1,37 @@
+[
+  {
+    "processes": 1,
+    "events": 41940,
+    "active_twins_max_per_process": 3289,
+    "elapsed_s": 30.353,
+    "throughput_eps": 1381.8,
+    "latency_ms": {
+      "p50": 2000.0,
+      "p95": 2000.0,
+      "p99": 2000.0
+    },
+    "cpu_pct_total": 101.2,
+    "memory_mb_total": 190.4,
+    "histogram_ms": {
+      "500": 52,
+      "1000": 14693,
+      "2000": 26798,
+      "5000": 397
+    },
+    "app_workers": 1,
+    "twins_offered": 3600,
+    "eta_segments": 0,
+    "predict_per_event": false,
+    "published_to_kafka": 2711,
+    "system": "statefun-predictive",
+    "offered": {
+      "sent": 41940,
+      "elapsed_s": 30.13,
+      "achieved_rate_eps": 1392,
+      "target_rate_eps": 1400,
+      "procs": 6,
+      "distinct_segments": 3600
+    },
+    "offered_rate": 1400
+  }
+]

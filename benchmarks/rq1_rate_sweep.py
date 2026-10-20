@@ -89,6 +89,8 @@ def main():
     p.add_argument("--rates", nargs="+", type=int, default=DEFAULT_RATES)
     p.add_argument("--seconds", type=float, default=30)
     p.add_argument("--twins", type=int, default=0)
+    p.add_argument("--label", default="",
+                   help="kept in the result filename, so separate runs do not overwrite one another")
     p.add_argument("--app-workers", type=int, default=1,
                    help="StateFun serving processes; ignored by the baseline")
     args = p.parse_args()
@@ -131,8 +133,12 @@ def main():
     print("=" * 80)
 
     os.makedirs(RESULTS, exist_ok=True)
+    # The name used to depend on the system and worker count alone, so a later
+    # run at one rate overwrote an earlier full sweep and the points were only
+    # recoverable from the logs. --label keeps separate runs in separate files.
     suffix = f"_w{args.app_workers}" if args.app_workers > 1 else ""
-    path = os.path.join(RESULTS, f"rq1_{args.system}{suffix}.json")
+    label = f"_{args.label}" if args.label else ""
+    path = os.path.join(RESULTS, f"rq1_{args.system}{suffix}{label}.json")
     with open(path, "w") as f:
         json.dump(points, f, indent=2)
     print("raw:", path)

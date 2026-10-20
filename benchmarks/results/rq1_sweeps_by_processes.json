@@ -1,0 +1,313 @@
+{
+ "note": "reconstructed from the run logs: rq1_rate_sweep.py writes one file per (system, workers), so the later single-rate repeat runs overwrote the full sweeps",
+ "serving_processes": {
+  "1": [
+   {
+    "offered_rate": 1000,
+    "throughput_eps": 1002.9,
+    "latency_ms": {
+     "p50": 100.0,
+     "p95": 1000.0,
+     "p99": 1000.0
+    },
+    "active_twins": 3600
+   },
+   {
+    "offered_rate": 1200,
+    "throughput_eps": 1197.0,
+    "latency_ms": {
+     "p50": 1000.0,
+     "p95": 1000.0,
+     "p99": 2000.0
+    },
+    "active_twins": 3600
+   },
+   {
+    "offered_rate": 1400,
+    "throughput_eps": 1387.5,
+    "latency_ms": {
+     "p50": 2000.0,
+     "p95": 2000.0,
+     "p99": 2000.0
+    },
+    "active_twins": 3600
+   },
+   {
+    "offered_rate": 1600,
+    "throughput_eps": 1563.0,
+    "latency_ms": {
+     "p50": 2000.0,
+     "p95": 5000.0,
+     "p99": 5000.0
+    },
+    "active_twins": 3600
+   },
+   {
+    "offered_rate": 1800,
+    "throughput_eps": 1765.9,
+    "latency_ms": {
+     "p50": 2000.0,
+     "p95": 5000.0,
+     "p99": 5000.0
+    },
+    "active_twins": 3600
+   },
+   {
+    "offered_rate": 2000,
+    "throughput_eps": 1943.6,
+    "latency_ms": {
+     "p50": 5000.0,
+     "p95": 5000.0,
+     "p99": 5000.0
+    },
+    "active_twins": 3600
+   },
+   {
+    "offered_rate": 3000,
+    "throughput_eps": 2674.4,
+    "latency_ms": {
+     "p50": 10000.0,
+     "p95": 20000.0,
+     "p99": 20000.0
+    },
+    "active_twins": 3600
+   },
+   {
+    "offered_rate": 4000,
+    "throughput_eps": 3069.8,
+    "latency_ms": {
+     "p50": 20000.0,
+     "p95": 20000.0,
+     "p99": 50000.0
+    },
+    "active_twins": 3600
+   }
+  ],
+  "2": [
+   {
+    "offered_rate": 2000,
+    "throughput_eps": 2015.3,
+    "latency_ms": {
+     "p50": 100.0,
+     "p95": 500.0,
+     "p99": 1000.0
+    },
+    "active_twins": 3600
+   },
+   {
+    "offered_rate": 2400,
+    "throughput_eps": 2416.8,
+    "latency_ms": {
+     "p50": 500.0,
+     "p95": 1000.0,
+     "p99": 2000.0
+    },
+    "active_twins": 3600
+   },
+   {
+    "offered_rate": 2800,
+    "throughput_eps": 2795.7,
+    "latency_ms": {
+     "p50": 500.0,
+     "p95": 1000.0,
+     "p99": 2000.0
+    },
+    "active_twins": 3600
+   },
+   {
+    "offered_rate": 3200,
+    "throughput_eps": 3184.9,
+    "latency_ms": {
+     "p50": 1000.0,
+     "p95": 2000.0,
+     "p99": 2000.0
+    },
+    "active_twins": 3600
+   },
+   {
+    "offered_rate": 3600,
+    "throughput_eps": 3578.6,
+    "latency_ms": {
+     "p50": 1000.0,
+     "p95": 2000.0,
+     "p99": 2000.0
+    },
+    "active_twins": 3600
+   },
+   {
+    "offered_rate": 4000,
+    "throughput_eps": 3956.6,
+    "latency_ms": {
+     "p50": 2000.0,
+     "p95": 2000.0,
+     "p99": 5000.0
+    },
+    "active_twins": 3600
+   },
+   {
+    "offered_rate": 6000,
+    "throughput_eps": 5673.3,
+    "latency_ms": {
+     "p50": 5000.0,
+     "p95": 10000.0,
+     "p99": 10000.0
+    },
+    "active_twins": 3600
+   },
+   {
+    "offered_rate": 8000,
+    "throughput_eps": 6951.0,
+    "latency_ms": {
+     "p50": 10000.0,
+     "p95": 10000.0,
+     "p99": 20000.0
+    },
+    "active_twins": 3600
+   }
+  ],
+  "4": [
+   {
+    "offered_rate": 4000,
+    "throughput_eps": 4032.1,
+    "latency_ms": {
+     "p50": 100.0,
+     "p95": 1000.0,
+     "p99": 1000.0
+    },
+    "active_twins": 3600
+   },
+   {
+    "offered_rate": 5000,
+    "throughput_eps": 5029.9,
+    "latency_ms": {
+     "p50": 200.0,
+     "p95": 1000.0,
+     "p99": 2000.0
+    },
+    "active_twins": 3600
+   },
+   {
+    "offered_rate": 6000,
+    "throughput_eps": 6023.1,
+    "latency_ms": {
+     "p50": 500.0,
+     "p95": 2000.0,
+     "p99": 2000.0
+    },
+    "active_twins": 3600
+   },
+   {
+    "offered_rate": 7000,
+    "throughput_eps": 7012.1,
+    "latency_ms": {
+     "p50": 500.0,
+     "p95": 2000.0,
+     "p99": 5000.0
+    },
+    "active_twins": 3600
+   },
+   {
+    "offered_rate": 8000,
+    "throughput_eps": 7990.4,
+    "latency_ms": {
+     "p50": 1000.0,
+     "p95": 5000.0,
+     "p99": 5000.0
+    },
+    "active_twins": 3600
+   },
+   {
+    "offered_rate": 10000,
+    "throughput_eps": 9881.9,
+    "latency_ms": {
+     "p50": 2000.0,
+     "p95": 5000.0,
+     "p99": 5000.0
+    },
+    "active_twins": 3600
+   },
+   {
+    "offered_rate": 12000,
+    "throughput_eps": 11741.3,
+    "latency_ms": {
+     "p50": 5000.0,
+     "p95": 5000.0,
+     "p99": 5000.0
+    },
+    "active_twins": 3600
+   }
+  ],
+  "8": [
+   {
+    "offered_rate": 8000,
+    "throughput_eps": 8056.3,
+    "latency_ms": {
+     "p50": 100.0,
+     "p95": 2000.0,
+     "p99": 2000.0
+    },
+    "active_twins": 3600
+   },
+   {
+    "offered_rate": 9000,
+    "throughput_eps": 9064.6,
+    "latency_ms": {
+     "p50": 1000.0,
+     "p95": 5000.0,
+     "p99": 5000.0
+    },
+    "active_twins": 3600
+   },
+   {
+    "offered_rate": 10000,
+    "throughput_eps": 10038.6,
+    "latency_ms": {
+     "p50": 500.0,
+     "p95": 5000.0,
+     "p99": 5000.0
+    },
+    "active_twins": 3600
+   },
+   {
+    "offered_rate": 11000,
+    "throughput_eps": 10775.5,
+    "latency_ms": {
+     "p50": 5000.0,
+     "p95": 5000.0,
+     "p99": 5000.0
+    },
+    "active_twins": 3600
+   },
+   {
+    "offered_rate": 12000,
+    "throughput_eps": 11455.8,
+    "latency_ms": {
+     "p50": 5000.0,
+     "p95": 5000.0,
+     "p99": 5000.0
+    },
+    "active_twins": 3600
+   },
+   {
+    "offered_rate": 14000,
+    "throughput_eps": 12240.9,
+    "latency_ms": {
+     "p50": 10000.0,
+     "p95": 10000.0,
+     "p99": 10000.0
+    },
+    "active_twins": 3600
+   },
+   {
+    "offered_rate": 16000,
+    "throughput_eps": 12916.5,
+    "latency_ms": {
+     "p50": 10000.0,
+     "p95": 10000.0,
+     "p99": 10000.0
+    },
+    "active_twins": 3600
+   }
+  ]
+ }
+}

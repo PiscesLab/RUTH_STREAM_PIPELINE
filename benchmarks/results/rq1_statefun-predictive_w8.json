@@ -1,70 +1,37 @@
 [
   {
     "processes": 8,
-    "events": 149939,
-    "active_twins_max_per_process": 3048,
-    "elapsed_s": 29.853,
-    "throughput_eps": 5022.6,
-    "latency_ms": {
-      "p50": 50.0,
-      "p95": 1000.0,
-      "p99": 1000.0
-    },
-    "cpu_pct_total": 577.1,
-    "memory_mb_total": 973.7,
-    "histogram_ms": {
-      "500": 4572,
-      "1000": 10144,
-      "2000": 925,
-      "200": 2438,
-      "100": 33562,
-      "50": 64098,
-      "20": 33856,
-      "10": 344
-    },
-    "app_workers": 8,
-    "twins_offered": 3600,
-    "published_to_kafka": 3123,
-    "system": "statefun-predictive",
-    "offered": {
-      "sent": 149939,
-      "elapsed_s": 30.17,
-      "achieved_rate_eps": 4969,
-      "target_rate_eps": 5000,
-      "procs": 6,
-      "distinct_segments": 3600
-    },
-    "offered_rate": 5000
-  },
-  {
-    "processes": 8,
-    "events": 299881,
-    "active_twins_max_per_process": 3216,
-    "elapsed_s": 29.869,
-    "throughput_eps": 10039.8,
+    "events": 299870,
+    "active_twins_max_per_process": 3126,
+    "elapsed_s": 29.84,
+    "throughput_eps": 10049.2,
     "latency_ms": {
       "p50": 500.0,
       "p95": 5000.0,
       "p99": 5000.0
     },
-    "cpu_pct_total": 912.3,
-    "memory_mb_total": 1059.7,
+    "cpu_pct_total": 846.5,
+    "memory_mb_total": 1092.9,
     "histogram_ms": {
-      "500": 56450,
-      "1000": 33741,
-      "2000": 37716,
-      "5000": 38052,
-      "200": 132420,
-      "100": 1502
+      "500": 152516,
+      "1000": 22926,
+      "2000": 36526,
+      "5000": 32131,
+      "200": 53738,
+      "100": 1892,
+      "50": 139,
+      "20": 2
     },
     "app_workers": 8,
     "twins_offered": 3600,
-    "published_to_kafka": 3122,
+    "eta_segments": 0,
+    "predict_per_event": false,
+    "published_to_kafka": 3129,
     "system": "statefun-predictive",
     "offered": {
-      "sent": 299881,
-      "elapsed_s": 30.18,
-      "achieved_rate_eps": 9937,
+      "sent": 299870,
+      "elapsed_s": 30.14,
+      "achieved_rate_eps": 9949,
       "target_rate_eps": 10000,
       "procs": 6,
       "distinct_segments": 3600
@@ -73,71 +40,111 @@
   },
   {
     "processes": 8,
-    "events": 449962,
-    "active_twins_max_per_process": 3385,
-    "elapsed_s": 33.719,
-    "throughput_eps": 13344.5,
+    "events": 419888,
+    "active_twins_max_per_process": 3165,
+    "elapsed_s": 29.952,
+    "throughput_eps": 14018.6,
+    "latency_ms": {
+      "p50": 1000.0,
+      "p95": 5000.0,
+      "p99": 10000.0
+    },
+    "cpu_pct_total": 898.5,
+    "memory_mb_total": 1144.6,
+    "histogram_ms": {
+      "1000": 157416,
+      "2000": 58286,
+      "5000": 117944,
+      "10000": 10032,
+      "500": 75880,
+      "200": 330
+    },
+    "app_workers": 8,
+    "twins_offered": 3600,
+    "eta_segments": 0,
+    "predict_per_event": false,
+    "published_to_kafka": 3128,
+    "system": "statefun-predictive",
+    "offered": {
+      "sent": 419888,
+      "elapsed_s": 30.14,
+      "achieved_rate_eps": 13931,
+      "target_rate_eps": 14000,
+      "procs": 6,
+      "distinct_segments": 3600
+    },
+    "offered_rate": 14000
+  },
+  {
+    "processes": 8,
+    "events": 539969,
+    "active_twins_max_per_process": 3227,
+    "elapsed_s": 30.481,
+    "throughput_eps": 17714.8,
     "latency_ms": {
       "p50": 5000.0,
       "p95": 10000.0,
       "p99": 10000.0
     },
-    "cpu_pct_total": 766.8,
-    "memory_mb_total": 1072.6,
+    "cpu_pct_total": 949.4,
+    "memory_mb_total": 1167.3,
     "histogram_ms": {
-      "500": 103,
-      "1000": 1662,
-      "2000": 5637,
-      "5000": 382885,
-      "10000": 59675
+      "1000": 10157,
+      "2000": 150803,
+      "5000": 313722,
+      "10000": 65285,
+      "20000": 2
     },
     "app_workers": 8,
     "twins_offered": 3600,
-    "published_to_kafka": 3134,
+    "eta_segments": 0,
+    "predict_per_event": false,
+    "published_to_kafka": 3158,
     "system": "statefun-predictive",
     "offered": {
-      "sent": 449962,
-      "elapsed_s": 30.19,
-      "achieved_rate_eps": 14904,
-      "target_rate_eps": 15000,
+      "sent": 539969,
+      "elapsed_s": 30.14,
+      "achieved_rate_eps": 17914,
+      "target_rate_eps": 18000,
       "procs": 6,
       "distinct_segments": 3600
     },
-    "offered_rate": 15000
+    "offered_rate": 18000
   },
   {
     "processes": 8,
-    "events": 599856,
-    "active_twins_max_per_process": 3493,
-    "elapsed_s": 46.006,
-    "throughput_eps": 13038.7,
+    "events": 596288,
+    "active_twins_max_per_process": 3158,
+    "elapsed_s": 31.039,
+    "throughput_eps": 19211.2,
     "latency_ms": {
-      "p50": 20000.0,
-      "p95": 20000.0,
-      "p99": 20000.0
+      "p50": 5000.0,
+      "p95": 10000.0,
+      "p99": 10000.0
     },
-    "cpu_pct_total": 901.7,
-    "memory_mb_total": 1093.7,
+    "cpu_pct_total": 967.2,
+    "memory_mb_total": 1176.1,
     "histogram_ms": {
-      "500": 203,
-      "1000": 1595,
-      "2000": 5140,
-      "5000": 31739,
-      "10000": 149732,
-      "20000": 411447
+      "1000": 1039,
+      "2000": 42409,
+      "5000": 455085,
+      "10000": 97607,
+      "20000": 148
     },
     "app_workers": 8,
     "twins_offered": 3600,
-    "published_to_kafka": 3115,
+    "eta_segments": 0,
+    "predict_per_event": false,
+    "published_to_kafka": 3113,
     "system": "statefun-predictive",
     "offered": {
-      "sent": 599856,
-      "elapsed_s": 30.19,
-      "achieved_rate_eps": 19871,
-      "target_rate_eps": 20000,
+      "sent": 596288,
+      "elapsed_s": 30.18,
+      "achieved_rate_eps": 19761,
+      "target_rate_eps": 22000,
       "procs": 6,
       "distinct_segments": 3600
     },
-    "offered_rate": 20000
+    "offered_rate": 22000
   }
 ]

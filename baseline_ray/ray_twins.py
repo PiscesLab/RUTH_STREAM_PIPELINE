@@ -74,7 +74,12 @@ class TwinShard:
         self.out_topic = out_topic
         self.state = {}        # segment_id -> {"current": [...], "history": [...]}
         self.metrics = {"count": 0, "published": 0, "histogram": {}, "segments": set(),
-                        "start": None, "last": None, "written_at": 0.0}
+                        "start": None, "last": None, "written_at": 0.0,
+                        # split the same way the other two builds split it, so
+                        # the three are comparable. Here "state" is a dictionary
+                        # lookup in this actor's own process: no round trip to
+                        # an engine, and nothing arriving with the invocation.
+                        "timers_s": {"state": 0.0, "model": 0.0, "total": 0.0}}
 
     def handle(self, events):
         """A batch of events, all belonging to this shard's segments."""
@@ -84,6 +89,7 @@ class TwinShard:
         return self.metrics["count"]
 
     def _one(self, event):
+        t_begin = time.perf_counter()
         now = time.time()
         m = self.metrics
         if m["start"] is None:
@@ -99,16 +105,21 @@ class TwinShard:
         minute = int(event["timestamp"]) // 60
         sent_at_ms = event.get("sent_at_ms")
 
+        t0 = time.perf_counter()
         entry = self.state.setdefault(segment_id, {"current": None, "history": []})
         current = entry["current"]
+        m["timers_s"]["state"] += time.perf_counter() - t0
 
         if current is not None and minute > current[0]:
             closed = [current[0], current[1] / current[2], current[3],
                       current[2], len(current[5]), current[4] / current[2]]
+            t0 = time.perf_counter()
             history = [h for h in entry["history"] if h[0] > closed[0] - HISTORY_MINUTES]
             history.append(closed)
             entry["history"] = history
+            m["timers_s"]["state"] += time.perf_counter() - t0
 
+            t_model = time.perf_counter()
             update = {
                 "mode": f"ray-{self.mode}", "segment_id": segment_id, "minute": closed[0],
                 "vehicles": closed[4], "samples": closed[3],
@@ -118,12 +129,15 @@ class TwinShard:
             }
             if self.mode == "predictive":
                 update["forecast"] = self.predictor.forecast(segment_id, length, history)
+            # predictor.current above and forecast here are the model work
+            m["timers_s"]["model"] += time.perf_counter() - t_model
             update["sent_at_ms"] = sent_at_ms
             self.producer.send(self.out_topic, key=segment_id.encode(),
                                value=json.dumps(update).encode())
             m["published"] += 1
             current = None
         elif current is not None and minute < current[0]:
+            m["timers_s"]["total"] += time.perf_counter() - t_begin
             self._record(sent_at_ms)
             return
 
@@ -135,7 +149,10 @@ class TwinShard:
         current[4] += speed < self.stopped_below
         if vehicle_id not in current[5]:
             current[5].append(vehicle_id)
+        t0 = time.perf_counter()
         entry["current"] = current
+        m["timers_s"]["state"] += time.perf_counter() - t0
+        m["timers_s"]["total"] += time.perf_counter() - t_begin
         self._record(sent_at_ms)
 
     def _record(self, sent_at_ms):
@@ -165,6 +182,8 @@ class TwinShard:
                            "active_twins": len(m["segments"]),
                            "histogram_ms": m["histogram"],
                            "start_epoch": m["start"], "last_epoch": m["last"],
+                           "timers_s": {k: round(v, 3)
+                                        for k, v in m["timers_s"].items()},
                            "cpu": {"pct_while_working": None},
                            "memory_mb": {"current": _memory_mb()}}, f)
             os.replace(path + ".tmp", path)

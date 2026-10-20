@@ -1,0 +1,15 @@
+{
+  "label": "checkpoints-on",
+  "killed": "statefun-worker2",
+  "events_sent": 120000,
+  "updates_before_kill": 7452,
+  "updates_after_recovery": 7452,
+  "extra_updates_after_kill": 0,
+  "replayed_share": 0.0,
+  "catchup_s": 21.0,
+  "settled": true,
+  "updates_after_second_batch": 5453,
+  "twins_with_pre_failure_history": 1877,
+  "share_with_pre_failure_history": 0.344,
+  "max_history_minutes_after": 9
+}

@@ -1,0 +1,33 @@
+{
+ "note": "time spent inside the twin, split the same way in each build. 'state' is what reaching the twin's state costs: a round trip to the engine per access in the keyed builds, deserialising what arrived with the invocation in StateTwin. Keyed figures from the run logs (keyed_perevent.log, keyed_perminute.log); StateTwin from a 2,000 events/s run with 8 serving processes, the same rate the keyed builds were offered. Ray actors hold their segments in a dictionary in the actor's own process, so its 'state' is a local lookup: the floor this comparison can reach.",
+ "builds": [
+  {
+   "name": "keyed, per event",
+   "events": 16086,
+   "state_s": 17.4,
+   "model_s": 1.4,
+   "total_s": 19.1
+  },
+  {
+   "name": "keyed, per minute",
+   "events": 15061,
+   "state_s": 6.1,
+   "model_s": 1.0,
+   "total_s": 7.4
+  },
+  {
+   "name": "StateTwin",
+   "events": 59940,
+   "state_s": 2.85,
+   "model_s": 2.88,
+   "total_s": 6.27
+  },
+  {
+   "name": "Ray actors",
+   "events": 58407,
+   "state_s": 0.14,
+   "model_s": 3.307,
+   "total_s": 4.86
+  }
+ ]
+}

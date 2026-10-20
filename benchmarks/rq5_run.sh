@@ -30,7 +30,11 @@ s = open(p).read()
 open(p, 'w').write(re.sub(r"^(\s*- topic: ).*$", r"\g<1>" + sys.argv[1], s, count=1, flags=re.M))
 EOF
 
-CHECKPOINTS=$MODE WORKERS=2 ./cluster/up.sh >/dev/null
+# Two slots per worker, so that killing one worker still leaves enough slots to
+# reschedule a job of parallelism two. With one slot each the job has nowhere to
+# restart and stays in RESTARTING, which is a property of the slot budget rather
+# than of recovery.
+CHECKPOINTS=$MODE WORKERS=2 SLOTS=2 PARALLELISM=2 ./cluster/up.sh >/dev/null
 sleep 20
 
 # the app must be restarted too: it is told which topic to publish to

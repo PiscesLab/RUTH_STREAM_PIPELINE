@@ -13,6 +13,10 @@ RATE=${2:-2000}
 SECS=${3:-30}
 TWINS=${4:-3600}
 MODE=${5:-predictive}
+# the reachable twin count is capped by the distinct vehicles seen per segment,
+# so a high TWINS needs more rows than the producer's default
+SOURCE_ROWS=${6:-50000}
+H5=${7:-/path/to/RUTH/benchmarks/san-diego-central/runs/1k_seed3/control/SanDiegoCentralFCD1kS3Control.h5}
 
 REPO=/path/to/RUTH_STREAM_PIPELINE
 RAY=/path/to/project/ray-venv/bin/python
@@ -38,7 +42,8 @@ sleep 45                       # actors load the models before anything useful h
 
 ./statefun-venv/bin/python producer/stream_to_kafka.py \
   --topic "$IN" --rate "$RATE" --seconds "$SECS" --twins "$TWINS" --procs 4 \
-  2>&1 | grep achieved
+  --source-rows "$SOURCE_ROWS" --h5 "$H5" \
+  2>&1 | grep -E 'achieved|distinct_segments'
 
 prev=-1
 for _ in $(seq 1 40); do

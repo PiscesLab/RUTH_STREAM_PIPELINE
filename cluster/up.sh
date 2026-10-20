@@ -30,10 +30,24 @@ SLOTS=${SLOTS:-1}
 # The StateFun image uses its own entrypoint, which ignores FLINK_PROPERTIES -
 # settings passed that way are silently dropped, and checkpointing stays off.
 # The configuration is therefore mounted as a file.
-CONF=/path/to/RUTH_STREAM_PIPELINE/cluster/flink-conf.checkpoints-${CHECKPOINTS}.yaml
-[ -f "$CONF" ] || { echo "no such config: $CONF"; exit 1; }
+BASE=/path/to/RUTH_STREAM_PIPELINE/cluster/flink-conf.checkpoints-${CHECKPOINTS}.yaml
+[ -f "$BASE" ] || { echo "no such config: $BASE"; exit 1; }
 
-echo "checkpointing=${CHECKPOINTS} workers=${WORKERS} slots=${SLOTS} interval=${INTERVAL}"
+# SLOTS used to be declared here and never applied, and parallelism.default was
+# set nowhere, so the job ran at parallelism 1: a single engine task read Kafka,
+# held all the state and made every call to the serving tier. That is the
+# engine-side limit the serving-tier scaling measurements ran into, so both are
+# now written into the config the containers actually mount.
+PARALLELISM=${PARALLELISM:-$((WORKERS * SLOTS))}
+CONF=/path/to/RUTH_STREAM_PIPELINE/cluster/.flink-conf.in-use.yaml
+cp "$BASE" "$CONF"
+{
+  echo ""
+  echo "taskmanager.numberOfTaskSlots: ${SLOTS}"
+  echo "parallelism.default: ${PARALLELISM}"
+} >> "$CONF"
+
+echo "checkpointing=${CHECKPOINTS} workers=${WORKERS} slots=${SLOTS} parallelism=${PARALLELISM} interval=${INTERVAL}"
 mkdir -p "$CKPT_DIR"
 
 sudo -n docker rm -f statefun-master >/dev/null 2>&1 || true

@@ -38,18 +38,18 @@ def sh(cmd):
     return subprocess.run(cmd, shell=True, capture_output=True, text=True)
 
 
-def run_statefun(mode, rate, seconds, twins, workers, h5, tag):
+def run_statefun(mode, rate, seconds, twins, workers, h5, tag, source_rows=200000):
     out = subprocess.run(
         [VENV, os.path.join(REPO, "benchmarks", "run_statefun.py"),
          "--mode", mode, "--rate", str(rate), "--seconds", str(seconds),
          "--twins", str(twins), "--app-workers", str(workers),
-         "--h5", h5, "--tag", tag, "--source-rows", "200000"],
+         "--h5", h5, "--tag", tag, "--source-rows", str(source_rows)],
         cwd=REPO, capture_output=True, text=True).stdout
     start = max(out.rfind('{\n  "mode"'), out.rfind('{\n  "processes"'))
     return json.loads(out[start:]) if start >= 0 else None
 
 
-def run_baseline(mode, rate, seconds, twins, h5, tag):
+def run_baseline(mode, rate, seconds, twins, h5, tag, source_rows=200000):
     stamp = f"{tag}_{int(time.time())}"
     in_topic, out_topic = f"in_{stamp}", f"out_{stamp}"
     for topic in (in_topic, out_topic):
@@ -66,7 +66,7 @@ def run_baseline(mode, rate, seconds, twins, h5, tag):
         gen = subprocess.run([VENV, os.path.join(REPO, "producer", "stream_to_kafka.py"),
                               "--h5", h5, "--topic", in_topic, "--rate", str(rate),
                               "--seconds", str(seconds), "--twins", str(twins),
-                              "--procs", "6", "--source-rows", "200000"],
+                              "--procs", "6", "--source-rows", str(source_rows)],
                              cwd=REPO, capture_output=True, text=True)
         offered = {}
         if "{" in gen.stdout:
@@ -97,6 +97,12 @@ def main():
     p.add_argument("--seconds", type=float, default=30)
     p.add_argument("--app-workers", type=int, default=8, help="StateFun serving processes")
     p.add_argument("--h5", default=BIG_H5)
+    p.add_argument("--label", default="",
+                   help="kept in the result filename, so separate runs do not overwrite one another")
+    p.add_argument("--source-rows", type=int, default=200000,
+                   help="rows read from the file; the twin count reachable is "
+                        "capped by the distinct vehicles seen per segment, so a "
+                        "high --twins needs more rows than the default")
     args = p.parse_args()
 
     kind, mode = args.system.split("-", 1)
@@ -104,10 +110,10 @@ def main():
     for twins in args.twins:
         print(f"\n=== {args.system}: {twins} twins at {args.rate} ev/s ===", flush=True)
         summary = (run_statefun(mode, args.rate, args.seconds, twins, args.app_workers,
-                                args.h5, f"rq2_{twins}")
+                                args.h5, f"rq2_{twins}", args.source_rows)
                    if kind == "statefun"
                    else run_baseline(mode, args.rate, args.seconds, twins, args.h5,
-                                     f"rq2_{twins}"))
+                                     f"rq2_{twins}", args.source_rows))
         if not summary:
             print("  FAILED: no summary", flush=True)
             points.append({"twins_offered": twins, "failed": True})
@@ -137,7 +143,8 @@ def main():
     print("and in the process itself for the baseline, so the two columns are not comparable.")
 
     os.makedirs(RESULTS, exist_ok=True)
-    path = os.path.join(RESULTS, f"rq2_{args.system}.json")
+    path = os.path.join(RESULTS,
+                        f"rq2_{args.system}{'_' + args.label if args.label else ''}.json")
     with open(path, "w") as f:
         json.dump(points, f, indent=2)
     print("raw:", path)

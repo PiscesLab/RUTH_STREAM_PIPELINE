@@ -1,0 +1,28 @@
+{
+  "records_scored": 15498,
+  "segments_per_estimate": 5,
+  "actual_duration_s": {
+    "median": 90.0,
+    "mean": 129.5
+  },
+  "estimators": {
+    "twin forecasts": {
+      "mae_s": 61.6,
+      "median_abs_error_s": 12.5,
+      "bias_s": 24.5,
+      "within_20pct": 0.578
+    },
+    "usual speed": {
+      "mae_s": 27.8,
+      "median_abs_error_s": 14.9,
+      "bias_s": -8.3,
+      "within_20pct": 0.584
+    },
+    "historical profile": {
+      "mae_s": 28.3,
+      "median_abs_error_s": 11.8,
+      "bias_s": -11.5,
+      "within_20pct": 0.605
+    }
+  }
+}

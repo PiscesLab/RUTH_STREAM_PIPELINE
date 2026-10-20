@@ -80,8 +80,23 @@ def main():
     p.add_argument("--settle-s", type=float, default=5.0)
     p.add_argument("--source-rows", type=int, default=50000,
                    help="rows read from the file; more rows = more twins available")
+    p.add_argument("--eta-segments", type=int, default=0,
+                   help="route queries per vehicle on entering a segment; 0 is off, "
+                        "and the pair of runs prices the fan-out")
+    p.add_argument("--key-by", default="segment", choices=["segment", "vehicle"],
+                   help="route queries need the ingress keyed by vehicle, so that a "
+                        "vehicle twin is one vehicle")
     p.add_argument("--app-workers", type=int, default=1,
                    help="serving processes sharing port 8000 (RQ4 varies this)")
+    p.add_argument("--predict-per-event", action="store_true",
+                   help="forecast on every event instead of once per closed "
+                        "minute, which prices the per-minute design decision")
+    p.add_argument("--eta-robust", action="store_true",
+                   help="answer route queries from the median of several recent "
+                        "minutes rather than the last one alone")
+    p.add_argument("--dump-eta", default=None,
+                   help="write the published route estimates to this file, for "
+                        "scoring with ml/eval_eta.py")
     args = p.parse_args()
     if not args.events and not args.seconds:
         args.events = 5000
@@ -91,6 +106,8 @@ def main():
     print(f"topics: {in_topic} -> {out_topic}")
     create_topic(in_topic)
     create_topic(out_topic)
+    if args.eta_segments:
+        create_topic(f"eta_{stamp}")      # the egress writes here; it must exist
 
     # the app runs as "python -u functions.py" from statefun_app/, so match the
     # bare script name; a pattern with the directory in it matches nothing and
@@ -110,7 +127,11 @@ def main():
 
     sh("rm -rf /tmp/statefun_metrics")
     env = dict(os.environ, PIPELINE_MODE=args.mode, OUTPUT_TOPIC=out_topic, QUIET="1",
-               APP_WORKERS=str(args.app_workers))
+               APP_WORKERS=str(args.app_workers),
+               ETA_SEGMENTS=str(args.eta_segments),
+               PREDICT_PER_EVENT="1" if args.predict_per_event else "0",
+               ETA_ROBUST="1" if args.eta_robust else "0",
+               ETA_TOPIC=f"eta_{stamp}")
     log = open(f"/tmp/app_{stamp}.log", "w")
     app = subprocess.Popen([VENV, "-u", "functions.py"], cwd=os.path.join(REPO, "statefun_app"),
                            env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
@@ -128,7 +149,7 @@ def main():
     load = [VENV, os.path.join(REPO, "producer", "stream_to_kafka.py"),
             "--h5", args.h5, "--topic", in_topic, "--procs", str(args.procs),
             "--rate", str(args.rate), "--twins", str(args.twins),
-            "--source-rows", str(args.source_rows)]
+            "--source-rows", str(args.source_rows), "--key-by", args.key_by]
     load += ["--seconds", str(args.seconds)] if args.seconds else ["--events", str(args.events)]
     print("sending load:", " ".join(load[2:]))
     sent = subprocess.run(load, cwd=REPO, capture_output=True, text=True).stdout
@@ -154,6 +175,26 @@ def main():
     # the authoritative twin population: how many distinct segments the load
     # actually covered, counted once by the generator
     summary["twins_offered"] = offered.get("distinct_segments")
+    summary["eta_segments"] = args.eta_segments
+    summary["predict_per_event"] = args.predict_per_event
+    if args.eta_segments:
+        etas = sh(f"{KAFKA}/kafka-run-class.sh kafka.tools.GetOffsetShell "
+                  f"--bootstrap-server localhost:9092 --topic eta_{stamp}").stdout
+        counted = 0
+        for line in etas.strip().splitlines():
+            tail = line.rsplit(":", 1)[-1].strip()
+            if tail.isdigit():                 # other lines are warnings, not offsets
+                counted += int(tail)
+        summary["eta_published"] = counted
+        if args.dump_eta:
+            # read the estimates back out so they can be scored against the
+            # routes; --from-beginning because the run has already finished
+            dump = sh(f"timeout 120 {KAFKA}/kafka-console-consumer.sh "
+                      f"--bootstrap-server localhost:9092 --topic eta_{stamp} "
+                      f"--from-beginning --max-messages {max(counted, 1)}")
+            with open(args.dump_eta, "w") as f:
+                f.write(dump.stdout)
+            print(f"route estimates written to {args.dump_eta}")
     published = sh(f"{KAFKA}/kafka-run-class.sh kafka.tools.GetOffsetShell "
                    f"--bootstrap-server localhost:9092 --topic {out_topic}").stdout.strip()
     summary["published_to_kafka"] = int(published.split(":")[-1]) if ":" in published else None

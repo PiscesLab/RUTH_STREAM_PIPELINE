@@ -101,7 +101,7 @@ def replay(df, producer, topic, speedup=1.0, limit=None):
 # load mode: maximum rate, or a fixed rate, from several processes
 # ---------------------------------------------------------------------------
 
-def build_messages(h5, rows, twins, time_shift_min=0):
+def build_messages(h5, rows, twins, time_shift_min=0, key_by="segment"):
     """Serialise every message once, split where the send timestamp goes.
 
     Each entry is (key, head, tail); the value sent is head + millis + tail.
@@ -147,7 +147,8 @@ def build_messages(h5, rows, twins, time_shift_min=0):
         }
         blob = json.dumps(payload)
         head, tail = blob.rsplit("}", 1)                  # sent_at_ms goes last
-        messages.append((segment_id.encode(),
+        key = segment_id if key_by == "segment" else str(int(row.vehicle_id))
+        messages.append((key.encode(),
                          (head + ', "sent_at_ms": ').encode(),
                          ("}" + tail).encode()))
     return messages
@@ -179,7 +180,8 @@ def sender(messages, topic, bootstrap, rate, seconds, events, result, offset=0):
 
 def send_load(args):
     print(f"preparing messages (twins={args.twins or 'as in file'})...", flush=True)
-    messages = build_messages(args.h5, args.source_rows, args.twins, args.time_shift_min)
+    messages = build_messages(args.h5, args.source_rows, args.twins, args.time_shift_min,
+                              args.key_by)
     distinct = len({m[0] for m in messages})
     print(f"{len(messages):,} messages ready, {distinct:,} distinct segments", flush=True)
 
@@ -225,6 +227,10 @@ def main():
     p.add_argument("--events", type=int, default=0, help="load: or send this many")
     p.add_argument("--procs", type=int, default=6, help="load: sender processes")
     p.add_argument("--twins", type=int, default=0, help="load: distinct segments; 0 = as in the file")
+    p.add_argument("--key-by", default="segment", choices=["segment", "vehicle"],
+                   help="Kafka message key. StateFun uses it to pick which "
+                        "com.ruth/vehicle instance receives the event, so route "
+                        "queries need it keyed by vehicle")
     p.add_argument("--time-shift-min", type=int, default=0,
                    help="add this many minutes to every event's simulated time, so a "
                         "second batch lands in the twins' future instead of in minutes "
