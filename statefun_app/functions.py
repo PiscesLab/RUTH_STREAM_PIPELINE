@@ -460,7 +460,7 @@ def _speed_now(history):
     """
     if not ETA_ROBUST:
         speed = history[-1][1]
-        if speed < VERY_SLOW_MPS and history[-1][4] < MIN_VEHICLES_TO_TRUST:
+        if speed is None or (speed < VERY_SLOW_MPS and history[-1][4] < MIN_VEHICLES_TO_TRUST):
             return None, "unreliable"
         return speed, "now"
 
