@@ -142,9 +142,9 @@ Keyed dataflow was not swept; at a fixed 2,000 events/s it completes 527
 | Question | Answer |
 |---|---|
 | More twins | 1,000 to 28,893 changed throughput and latency by nothing, serving memory by 8.8% |
-| Cost of inference | not measurable: 10,048 vs 10,054 events/s, identical latency |
+| Cost of inference | not measurable: 10,069 vs 10,045 events/s (repeated runs: 10,049 vs 10,041), identical latency |
 | Cost of route queries | sustainable throughput falls from 14,000 to about 5,000 |
-| Failure | output stops for 42.6-45.0 s whatever the twin count; checkpointing costs <0.3% |
+| Failure | output stops for 45.6-47.8 s across the tested twin counts; checkpointing costs <0.3% |
 | Where the time goes | reaching state: 1.08 ms/event fetched, 0.048 ms shipped, 0.002 ms in-process |
 
 Forecast quality on the held-out test split (seed 4, 10k vehicles, m/s, lower is
