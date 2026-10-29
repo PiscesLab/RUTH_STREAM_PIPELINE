@@ -16,9 +16,9 @@ MODE=${5:-predictive}
 # the reachable twin count is capped by the distinct vehicles seen per segment,
 # so a high TWINS needs more rows than the producer's default
 SOURCE_ROWS=${6:-50000}
-H5=${7:-/path/to/RUTH/benchmarks/san-diego-central/runs/1k_seed3/control/SanDiegoCentralFCD1kS3Control.h5}
+H5=${7:-${RUTH_RUNS_ROOT:?RUTH_RUNS_ROOT is not set}/1k_seed3/control/SanDiegoCentralFCD1kS3Control.h5}
 
-REPO=/path/to/RUTH_STREAM_PIPELINE
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
 RAY=/path/to/project/ray-venv/bin/python
 KAFKA=~/kafka/bin
 STAMP=$(date +%s)

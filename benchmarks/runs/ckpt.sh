@@ -5,7 +5,7 @@
 # measurement reports two. The comparison was internally matched and so valid,
 # but more subtasks mean more snapshot writers, and the cost need not carry
 # over. Measuring it again at parallelism two removes the question.
-cd /path/to/RUTH_STREAM_PIPELINE || exit 1
+cd "$(dirname "$0")/../.." || exit 1
 VENV=./statefun-venv/bin/python
 
 for MODE in on off; do

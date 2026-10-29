@@ -11,7 +11,7 @@
 #
 set -euo pipefail
 MODE=${1:?usage: rq5_run.sh on|off}
-REPO=/path/to/RUTH_STREAM_PIPELINE
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
 KAFKA=~/kafka/bin
 STAMP=$(date +%s)
 IN=rq5_${MODE}_in_${STAMP}
@@ -23,9 +23,9 @@ for t in "$IN" "$OUT"; do
     --topic "$t" --partitions 4 --replication-factor 1 >/dev/null 2>&1 || true
 done
 
-python3 - "$IN" <<'EOF'
+python3 - "$IN" "$REPO/statefun_app/module.yaml" <<'EOF'
 import re, sys
-p = '/path/to/RUTH_STREAM_PIPELINE/statefun_app/module.yaml'
+p = sys.argv[2]
 s = open(p).read()
 open(p, 'w').write(re.sub(r"^(\s*- topic: ).*$", r"\g<1>" + sys.argv[1], s, count=1, flags=re.M))
 EOF

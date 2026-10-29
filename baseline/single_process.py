@@ -236,8 +236,8 @@ def main():
     p.add_argument("--bootstrap", default="localhost:9092")
     p.add_argument("--produce", action="store_true", help="send the events itself")
     p.add_argument("--events", type=int, default=5000)
-    p.add_argument("--h5", default="/path/to/RUTH/benchmarks/san-diego-central/"
-                                   "runs/1k_seed3/control/SanDiegoCentralFCD1kS3Control.h5")
+    p.add_argument("--h5", default=os.path.join(os.environ.get("RUTH_RUNS_ROOT", "data/san-diego-central/runs"),
+                                   "1k_seed3/control/SanDiegoCentralFCD1kS3Control.h5"))
     p.add_argument("--idle-s", type=float, default=8.0, help="stop after this long with no events")
     args = p.parse_args()
 

@@ -29,7 +29,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KAFKA = os.path.expanduser("~/kafka/bin")
 MODULE = os.path.join(REPO, "statefun_app", "module.yaml")
 VENV = os.path.join(REPO, "statefun-venv", "bin", "python")
-DEFAULT_H5 = ("/path/to/RUTH/benchmarks/san-diego-central/runs/"
+DEFAULT_H5 = os.path.join(os.environ.get("RUTH_RUNS_ROOT", "data/san-diego-central/runs"),
               "1k_seed3/control/SanDiegoCentralFCD1kS3Control.h5")
 
 

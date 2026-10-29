@@ -8,10 +8,10 @@
 # The twin count reachable is capped by the distinct vehicles seen per segment,
 # so every run reads 1,000,000 rows of the 10k-vehicle file, which reaches
 # ~28,900 distinct twins at the top of the ladder.
-cd /path/to/RUTH_STREAM_PIPELINE || exit 1
+cd "$(dirname "$0")/../.." || exit 1
 
 VENV=./statefun-venv/bin/python
-H5=/path/to/RUTH/benchmarks/san-diego-central/runs/10k_seed3/control/SanDiegoCentralFCD10kS3Control.h5
+H5=${RUTH_RUNS_ROOT:?RUTH_RUNS_ROOT is not set}/10k_seed3/control/SanDiegoCentralFCD10kS3Control.h5
 ROWS=1000000
 RATE=5000
 SECS=30

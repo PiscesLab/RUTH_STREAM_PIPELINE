@@ -7,7 +7,7 @@
 # (992 against 3,600), which is not a comparison worth making. These two points
 # find where the same configuration saturates with queries disabled, so both
 # sides of the factor come from one sweep.
-cd /path/to/RUTH_STREAM_PIPELINE || exit 1
+cd "$(dirname "$0")/../.." || exit 1
 VENV=./statefun-venv/bin/python
 
 for R in 11000 14000; do

@@ -9,7 +9,7 @@
 #
 # The cluster is rebuilt with two workers and checkpointing on, matching the
 # coarse sweep: a one-worker cluster would not be comparable with it.
-cd /path/to/RUTH_STREAM_PIPELINE || exit 1
+cd "$(dirname "$0")/../.." || exit 1
 VENV=./statefun-venv/bin/python
 
 say() { echo; echo "##### $* #####"; date; df -h / | tail -1; echo; }

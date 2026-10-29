@@ -32,11 +32,13 @@ import json
 import multiprocessing as mp
 import time
 
+import os
+
 import h5py
 import pandas as pd
 from kafka import KafkaProducer
 
-DEFAULT_H5 = ("/path/to/RUTH/benchmarks/san-diego-central/runs/"
+DEFAULT_H5 = os.path.join(os.environ.get("RUTH_RUNS_ROOT", "data/san-diego-central/runs"),
               "1k_seed3/control/SanDiegoCentralFCD1kS3Control.h5")
 
 

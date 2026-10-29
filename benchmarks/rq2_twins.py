@@ -30,7 +30,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VENV = os.path.join(REPO, "statefun-venv", "bin", "python")
 KAFKA = os.path.expanduser("~/kafka/bin")
 RESULTS = os.path.join(REPO, "benchmarks", "results")
-BIG_H5 = ("/path/to/RUTH/benchmarks/san-diego-central/runs/"
+BIG_H5 = os.path.join(os.environ.get("RUTH_RUNS_ROOT", "data/san-diego-central/runs"),
           "10k_seed3/control/SanDiegoCentralFCD10kS3Control.h5")
 
 

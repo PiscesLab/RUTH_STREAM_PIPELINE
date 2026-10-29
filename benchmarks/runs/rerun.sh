@@ -10,7 +10,7 @@
 #
 # The rules from the previous script still hold: source rows exceed the events
 # sent, every point in a comparison shares them, and no output is truncated.
-cd /path/to/RUTH_STREAM_PIPELINE || exit 1
+cd "$(dirname "$0")/../.." || exit 1
 VENV=./statefun-venv/bin/python
 
 say() { echo; echo "##### $* #####"; date; df -h / | tail -1; echo; }
@@ -59,7 +59,7 @@ $VENV benchmarks/run_statefun.py --mode predictive --rate 2000 --seconds 30 \
   --app-workers 8 --tag rq3_systems 2>&1
 
 # RQ5 last, because it is the stage that leaves a worker dead
-BIG_H5=/path/to/RUTH/benchmarks/san-diego-central/runs/10k_seed3/control/SanDiegoCentralFCD10kS3Control.h5
+BIG_H5=${RUTH_RUNS_ROOT:?RUTH_RUNS_ROOT is not set}/10k_seed3/control/SanDiegoCentralFCD10kS3Control.h5
 for T in 1000 10000 36396; do
   say "RQ5  recovery at ${T} twins"
   ./benchmarks/rq5_run.sh on --live-kill --twins "$T" --rate 2000 \

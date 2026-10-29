@@ -21,7 +21,7 @@ import pandas as pd
 
 from segment_minutes import add_targets, clock_to_minute, load_fcd, segment_minutes
 
-RUNS_ROOT = "/path/to/RUTH/benchmarks/san-diego-central/runs"
+RUNS_ROOT = os.environ.get("RUTH_RUNS_ROOT", "data/san-diego-central/runs")
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
 
 LEVELS = ("1k", "5k", "10k", "100k")

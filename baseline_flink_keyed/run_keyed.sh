@@ -22,7 +22,7 @@ SECONDS_=${3:-30}
 PAR=${4:-4}
 TWINS=${5:-3600}
 
-REPO=/path/to/RUTH_STREAM_PIPELINE
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
 VENV=/path/to/project/flink-venv/bin/python
 KAFKA=~/kafka/bin
 STAMP=$(date +%s)
