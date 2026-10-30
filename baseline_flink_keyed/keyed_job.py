@@ -24,7 +24,7 @@ both, but the models are scikit-learn.
 
 Run (needs the separate PyFlink venv, which does not disturb statefun-venv):
 
-    /path/to/project/flink-venv/bin/python baseline_flink_keyed/keyed_job.py \
+    $PROJ_DIR/flink-venv/bin/python baseline_flink_keyed/keyed_job.py \
         --topic fcd_events_keyed --out-topic keyed_updates --mode predictive \
         --parallelism 8
 """
@@ -49,7 +49,7 @@ from pyflink.datastream.connectors.kafka import (  # noqa: E402
     DeliveryGuarantee)
 
 HISTORY_MINUTES = 15
-JAR = "file:///path/to/project/flink-jars/flink-sql-connector-kafka-3.3.0-1.20.jar"
+JAR = "file://" + os.path.join(os.environ.get("PROJ_DIR", "/path/to/project"), "flink-jars", "flink-sql-connector-kafka-3.3.0-1.20.jar")
 METRICS_DIR = os.environ.get("METRICS_DIR", "/tmp/keyed_metrics")
 HIST_EDGES = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000]
 

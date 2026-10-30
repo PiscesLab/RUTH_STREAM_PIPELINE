@@ -175,8 +175,8 @@ Three, because the dependencies conflict:
 | | Used for |
 |---|---|
 | `statefun-venv/` | the twins, the producer, the benchmarks |
-| `/path/to/project/flink-venv/` | the keyed-stream baseline (PyFlink pins its own pandas/numpy) |
-| `/path/to/project/ray-venv/` | the Ray baseline |
+| `$PROJ_DIR/flink-venv/` | the keyed-stream baseline (PyFlink pins its own pandas/numpy) |
+| `$PROJ_DIR/ray-venv/` | the Ray baseline |
 
 The last two live on the project volume because the root disk is nearly full.
 

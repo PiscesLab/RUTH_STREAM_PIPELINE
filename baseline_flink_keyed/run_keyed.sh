@@ -23,7 +23,7 @@ PAR=${4:-4}
 TWINS=${5:-3600}
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-VENV=/path/to/project/flink-venv/bin/python
+VENV=${PROJ_DIR:?PROJ_DIR is not set}/flink-venv/bin/python
 KAFKA=~/kafka/bin
 STAMP=$(date +%s)
 IN=keyed_${STATE}_in_${STAMP}

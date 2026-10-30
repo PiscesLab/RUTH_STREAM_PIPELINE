@@ -19,7 +19,7 @@ SOURCE_ROWS=${6:-50000}
 H5=${7:-${RUTH_RUNS_ROOT:?RUTH_RUNS_ROOT is not set}/1k_seed3/control/SanDiegoCentralFCD1kS3Control.h5}
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-RAY=/path/to/project/ray-venv/bin/python
+RAY=${PROJ_DIR:?PROJ_DIR is not set}/ray-venv/bin/python
 KAFKA=~/kafka/bin
 STAMP=$(date +%s)
 IN=ray_in_${STAMP}
